@@ -1,0 +1,2698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Part 6: AF_XDP | Linux Networking for Agave Validators</title>
+<meta name="description" content="Part 6 of 7: AF_XDP zero-copy rings that bypass the kernel entirely. Shared memory, lock-free SPSC rings, and how Agave uses selective kernel bypass. From the Turbin3 Advanced SVM cohort.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ========================================
+   CSS CUSTOM PROPERTIES
+   ======================================== */
+:root {
+  --bg-primary: #0a0e17;
+  --bg-secondary: #0f1420;
+  --bg-card: #131927;
+  --bg-card-hover: #1a2236;
+  --bg-code: #0d1219;
+  --bg-highlight: rgba(0, 245, 160, 0.06);
+
+  --accent: #00f5a0;
+  --accent-dim: #00c880;
+  --accent-glow: rgba(0, 245, 160, 0.15);
+  --accent-glow-strong: rgba(0, 245, 160, 0.3);
+
+  --text-primary: #e8ecf4;
+  --text-secondary: #8a94a8;
+  --text-muted: #5a6478;
+  --text-code: #a8d8ea;
+
+  --border: #1e2a3a;
+  --border-accent: rgba(0, 245, 160, 0.2);
+
+  --red: #ff6b6b;
+  --red-dim: rgba(255, 107, 107, 0.12);
+  --orange: #ffa94d;
+  --orange-dim: rgba(255, 169, 77, 0.12);
+  --blue: #4dabf7;
+  --blue-dim: rgba(77, 171, 247, 0.12);
+  --purple: #b197fc;
+  --purple-dim: rgba(177, 151, 252, 0.12);
+  --yellow: #ffd43b;
+  --yellow-dim: rgba(255, 212, 59, 0.12);
+  --cyan: #22d3ee;
+  --cyan-dim: rgba(34, 211, 238, 0.12);
+
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.3), 0 1px 4px rgba(0, 0, 0, 0.2);
+  --shadow-glow: 0 0 30px rgba(0, 245, 160, 0.08);
+
+  --max-width: 820px;
+  --spacing-unit: 8px;
+}
+
+/* ========================================
+   RESET & BASE
+   ======================================== */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: 17px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  overflow-x: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  html { scroll-behavior: auto; }
+  .umem-frame { animation: none !important; }
+  .dma-pulse { animation: none !important; }
+}
+
+/* ========================================
+   SERIES NAVIGATION BAR
+   ======================================== */
+.series-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: rgba(10, 14, 23, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 24px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.series-nav__left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.series-nav__label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.series-nav__title {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .series-nav__title { display: block; }
+}
+
+.series-nav__right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.series-nav__progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.series-nav__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: background 200ms ease, box-shadow 200ms ease;
+}
+
+.series-nav__dot--done {
+  background: var(--accent-dim);
+}
+
+.series-nav__dot--active {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow-strong);
+}
+
+.series-nav__dot--future {
+  background: var(--text-muted);
+  opacity: 0.3;
+}
+
+.series-nav__links {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .series-nav__links { display: flex; gap: 8px; }
+}
+
+.series-nav__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-decoration: none;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  transition: color 200ms ease, border-color 200ms ease, background 200ms ease;
+  cursor: pointer;
+}
+
+.series-nav__link:hover {
+  color: var(--accent);
+  border-color: var(--border-accent);
+  background: var(--bg-highlight);
+}
+
+/* Reading progress bar */
+.reading-progress {
+  position: fixed;
+  top: 56px;
+  left: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-dim));
+  z-index: 101;
+  width: 0%;
+  transition: width 100ms linear;
+  box-shadow: 0 0 8px var(--accent-glow-strong);
+}
+
+/* ========================================
+   MAIN LAYOUT
+   ======================================== */
+.page-wrapper {
+  padding-top: 80px;
+  padding-bottom: 120px;
+}
+
+.container {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+@media (min-width: 768px) {
+  .container { padding: 0 32px; }
+}
+
+/* ========================================
+   HERO / OPENING
+   ======================================== */
+.hero {
+  padding: 48px 0 64px;
+  position: relative;
+}
+
+.hero__part-label {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hero__part-label::before {
+  content: '';
+  display: inline-block;
+  width: 24px;
+  height: 1px;
+  background: var(--accent);
+}
+
+.hero__title {
+  font-family: var(--font-display);
+  font-size: clamp(32px, 6vw, 52px);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  margin-bottom: 24px;
+}
+
+.hero__title span {
+  color: var(--accent);
+  text-shadow: 0 0 40px var(--accent-glow-strong);
+}
+
+.hero__subtitle {
+  font-size: 18px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  max-width: 600px;
+}
+
+.hero__subtitle strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* ========================================
+   SECTION STYLING
+   ======================================== */
+.section {
+  margin-bottom: 80px;
+}
+
+.section__number {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.section__number::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--border-accent), transparent);
+}
+
+.section__heading {
+  font-family: var(--font-display);
+  font-size: clamp(24px, 4vw, 32px);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-primary);
+  margin-bottom: 24px;
+  letter-spacing: -0.01em;
+}
+
+.section p {
+  margin-bottom: 20px;
+  color: var(--text-secondary);
+}
+
+.section p strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.section p code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--bg-code);
+  color: var(--text-code);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+/* ========================================
+   ANALOGY / CALLOUT
+   ======================================== */
+.analogy {
+  background: var(--bg-highlight);
+  border: 1px solid var(--border-accent);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md);
+  padding: 20px 24px;
+  margin: 28px 0;
+}
+
+.analogy__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+
+.analogy p {
+  color: var(--text-primary);
+  margin-bottom: 0;
+  font-size: 16px;
+}
+
+.analogy p strong {
+  color: var(--accent);
+}
+
+/* ========================================
+   ORDERED STEPS LIST
+   ======================================== */
+.steps-list {
+  list-style: none;
+  margin: 28px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.steps-list li {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.steps-list__num {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-glow);
+  border: 1px solid var(--border-accent);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.steps-list__text {
+  font-size: 15px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.steps-list__text strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.steps-list__text code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--bg-code);
+  color: var(--text-code);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+/* ========================================
+   UMEM VISUAL: FRAME GRID
+   ======================================== */
+.umem-visual {
+  margin: 40px 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 32px 24px;
+  overflow: hidden;
+}
+
+.umem-visual__title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.umem-visual__subtitle {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.umem-grid {
+  display: grid;
+  grid-template-columns: repeat(16, 1fr);
+  gap: 3px;
+  margin-bottom: 24px;
+}
+
+@media (max-width: 639px) {
+  .umem-grid {
+    grid-template-columns: repeat(8, 1fr);
+  }
+}
+
+.umem-frame {
+  aspect-ratio: 1;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  position: relative;
+  transition: transform 150ms ease, border-color 200ms ease;
+}
+
+.umem-frame:hover {
+  transform: scale(1.3);
+  z-index: 2;
+  border-color: var(--text-muted);
+}
+
+.umem-frame--empty {
+  background: rgba(30, 42, 58, 0.4);
+  border-color: rgba(30, 42, 58, 0.6);
+}
+
+.umem-frame--fill {
+  background: var(--blue-dim);
+  border-color: rgba(77, 171, 247, 0.3);
+  animation: umem-pulse-fill 3s ease-in-out infinite;
+}
+
+.umem-frame--rx {
+  background: var(--accent-glow);
+  border-color: var(--border-accent);
+  animation: umem-pulse-rx 3s ease-in-out infinite;
+}
+
+.umem-frame--processing {
+  background: var(--purple-dim);
+  border-color: rgba(177, 151, 252, 0.3);
+  animation: umem-pulse-proc 2.5s ease-in-out infinite;
+}
+
+@keyframes umem-pulse-fill {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+@keyframes umem-pulse-rx {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+@keyframes umem-pulse-proc {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.umem-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 20px;
+}
+
+.umem-legend__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.umem-legend__swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.umem-legend__swatch--empty {
+  background: rgba(30, 42, 58, 0.4);
+  border: 1px solid rgba(30, 42, 58, 0.6);
+}
+
+.umem-legend__swatch--fill {
+  background: var(--blue-dim);
+  border: 1px solid rgba(77, 171, 247, 0.3);
+}
+
+.umem-legend__swatch--rx {
+  background: var(--accent-glow);
+  border: 1px solid var(--border-accent);
+}
+
+.umem-legend__swatch--processing {
+  background: var(--purple-dim);
+  border: 1px solid rgba(177, 151, 252, 0.3);
+}
+
+.umem-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-top: 20px;
+}
+
+@media (min-width: 640px) {
+  .umem-stats { grid-template-columns: repeat(4, 1fr); }
+}
+
+.umem-stat {
+  text-align: center;
+  padding: 12px 8px;
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.umem-stat__val {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.umem-stat__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-top: 2px;
+}
+
+/* ========================================
+   FOUR RINGS: ANIMATED CIRCULAR FLOW
+   ======================================== */
+.rings-visual {
+  margin: 48px 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.rings-visual__header {
+  padding: 20px 24px;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0, 245, 160, 0.03);
+}
+
+.rings-visual__header-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.rings-visual__header-title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.rings-visual__body {
+  padding: 32px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 32px;
+}
+
+@media (min-width: 768px) {
+  .rings-visual__body { padding: 40px 32px; }
+}
+
+/* SVG ring diagram */
+.ring-diagram {
+  width: 100%;
+  max-width: 520px;
+}
+
+/* Ring descriptions */
+.ring-cards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  width: 100%;
+}
+
+@media (min-width: 480px) {
+  .ring-cards { grid-template-columns: 1fr 1fr; }
+}
+
+.ring-card {
+  padding: 16px 20px;
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  border-left: 3px solid;
+}
+
+.ring-card--fill { border-left-color: var(--blue); }
+.ring-card--rx { border-left-color: var(--accent); }
+.ring-card--tx { border-left-color: var(--orange); }
+.ring-card--comp { border-left-color: var(--purple); }
+
+.ring-card__name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.ring-card--fill .ring-card__name { color: var(--blue); }
+.ring-card--rx .ring-card__name { color: var(--accent); }
+.ring-card--tx .ring-card__name { color: var(--orange); }
+.ring-card--comp .ring-card__name { color: var(--purple); }
+
+.ring-card__direction {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.ring-card__desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* Cycle steps */
+.cycle-steps {
+  width: 100%;
+  max-width: 520px;
+}
+
+.cycle-steps__title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.cycle-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  position: relative;
+  padding-left: 20px;
+}
+
+.cycle-flow::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 16px;
+  bottom: 16px;
+  width: 2px;
+  background: linear-gradient(180deg, var(--blue), var(--accent), var(--purple), var(--blue));
+  border-radius: 1px;
+}
+
+.cycle-step {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 0;
+}
+
+.cycle-step__dot {
+  position: absolute;
+  left: -20px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid;
+  background: var(--bg-primary);
+  flex-shrink: 0;
+  z-index: 1;
+}
+
+.cycle-step:nth-child(1) .cycle-step__dot { border-color: var(--blue); }
+.cycle-step:nth-child(2) .cycle-step__dot { border-color: var(--cyan); }
+.cycle-step:nth-child(3) .cycle-step__dot { border-color: var(--accent); }
+.cycle-step:nth-child(4) .cycle-step__dot { border-color: var(--accent); }
+.cycle-step:nth-child(5) .cycle-step__dot { border-color: var(--purple); }
+.cycle-step:nth-child(6) .cycle-step__dot { border-color: var(--blue); }
+
+.cycle-step:nth-child(6) .cycle-step__dot::after {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  background: var(--blue);
+}
+
+.cycle-step__num {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  width: 20px;
+  flex-shrink: 0;
+}
+
+.cycle-step__text {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.cycle-step__text strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.cycle-step__text code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--bg-code);
+  color: var(--text-code);
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
+
+.ring-lock-note {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 12px 16px;
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  width: 100%;
+  max-width: 520px;
+}
+
+.ring-lock-note strong {
+  color: var(--accent);
+}
+
+/* ========================================
+   AF_XDP OBJECTS
+   ======================================== */
+.objects-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  margin: 28px 0;
+}
+
+@media (min-width: 480px) {
+  .objects-grid { grid-template-columns: 1fr 1fr; }
+}
+
+.object-card {
+  padding: 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+
+.object-card:hover {
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow-glow);
+}
+
+.object-card__icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.object-card--xsk .object-card__icon { background: var(--accent-glow); color: var(--accent); }
+.object-card--umem .object-card__icon { background: var(--blue-dim); color: var(--blue); }
+.object-card--rx .object-card__icon { background: var(--cyan-dim); color: var(--cyan); }
+.object-card--tx .object-card__icon { background: var(--orange-dim); color: var(--orange); }
+
+.object-card__name {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.object-card__desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* ========================================
+   ELIMINATION TABLE
+   ======================================== */
+.elim-table-wrap {
+  margin: 40px 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.elim-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  min-width: 520px;
+}
+
+.elim-table th {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+  padding: 12px 16px;
+  border-bottom: 2px solid var(--border);
+  color: var(--text-muted);
+}
+
+.elim-table th:nth-child(2) { color: var(--accent); }
+.elim-table th:nth-child(3) { color: var(--accent); }
+
+.elim-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(30, 42, 58, 0.5);
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.elim-table td:first-child {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-decoration: line-through;
+  text-decoration-color: rgba(255, 107, 107, 0.4);
+}
+
+.elim-table td:nth-child(2) {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.elim-table td:nth-child(3) {
+  text-align: center;
+}
+
+.elim-table tr:hover td {
+  background: rgba(0, 245, 160, 0.02);
+}
+
+.check-yes {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent-glow);
+  border: 1px solid var(--border-accent);
+  color: var(--accent);
+}
+
+/* ========================================
+   ZERO COPY VS COPY MODE
+   ======================================== */
+.mode-compare {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  margin: 28px 0;
+}
+
+@media (min-width: 480px) {
+  .mode-compare { grid-template-columns: 1fr 1fr; }
+}
+
+.mode-card {
+  padding: 24px;
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  position: relative;
+  overflow: hidden;
+}
+
+.mode-card--zero {
+  border: 2px solid var(--border-accent);
+}
+
+.mode-card--zero::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+}
+
+.mode-card--copy {
+  border: 1px solid var(--border);
+}
+
+.mode-card__badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 20px;
+  display: inline-block;
+  margin-bottom: 12px;
+}
+
+.mode-card--zero .mode-card__badge {
+  background: var(--accent-glow);
+  color: var(--accent);
+  border: 1px solid var(--border-accent);
+}
+
+.mode-card--copy .mode-card__badge {
+  background: var(--orange-dim);
+  color: var(--orange);
+  border: 1px solid rgba(255, 169, 77, 0.25);
+}
+
+.mode-card__title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+
+.mode-card__desc {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 12px;
+}
+
+.mode-card__drivers {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.mode-card__drivers strong {
+  color: var(--text-secondary);
+}
+
+/* ========================================
+   SELECTIVE BYPASS ROUTING
+   ======================================== */
+.routing-visual {
+  margin: 40px 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.routing-visual__header {
+  padding: 16px 24px;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0, 245, 160, 0.03);
+}
+
+.routing-visual__header-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.routing-rows {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.routing-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  transition: border-color 200ms ease;
+}
+
+@media (max-width: 639px) {
+  .routing-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    text-align: center;
+  }
+}
+
+.routing-row:hover {
+  border-color: var(--border-accent);
+}
+
+.routing-row__source {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.routing-row__arrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+
+.routing-row--redirect .routing-row__arrow {
+  background: var(--accent-glow);
+  color: var(--accent);
+  border: 1px solid var(--border-accent);
+}
+
+.routing-row--pass .routing-row__arrow {
+  background: var(--blue-dim);
+  color: var(--blue);
+  border: 1px solid rgba(77, 171, 247, 0.25);
+}
+
+.routing-row--drop .routing-row__arrow {
+  background: var(--red-dim);
+  color: var(--red);
+  border: 1px solid rgba(255, 107, 107, 0.25);
+}
+
+.routing-row__dest {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+@media (min-width: 640px) {
+  .routing-row--redirect .routing-row__dest,
+  .routing-row--pass .routing-row__dest {
+    text-align: right;
+  }
+}
+
+.routing-row__dest strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* ========================================
+   ARCHITECTURE DIAGRAM (SVG)
+   ======================================== */
+.arch-visual {
+  margin: 48px 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 32px 16px;
+  overflow: hidden;
+}
+
+@media (min-width: 768px) {
+  .arch-visual { padding: 40px 32px; }
+}
+
+.arch-visual__title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.arch-svg-wrap {
+  width: 100%;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.arch-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 20px;
+  margin-top: 24px;
+}
+
+.arch-legend__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.arch-legend__line {
+  width: 24px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+.arch-legend__line--bypass { background: var(--accent); }
+.arch-legend__line--normal { background: var(--blue); }
+.arch-legend__line--drop { background: var(--red); }
+
+.arch-legend__item--bypass { color: var(--accent); }
+.arch-legend__item--normal { color: var(--blue); }
+.arch-legend__item--drop { color: var(--red); }
+
+/* ========================================
+   FULL vs SELECTIVE CALLOUT
+   ======================================== */
+.bypass-compare {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  margin: 28px 0;
+}
+
+@media (min-width: 480px) {
+  .bypass-compare { grid-template-columns: 1fr 1fr; }
+}
+
+.bypass-card {
+  padding: 24px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+.bypass-card__badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 20px;
+  display: inline-block;
+  margin-bottom: 12px;
+}
+
+.bypass-card--selective .bypass-card__badge {
+  background: var(--accent-glow);
+  color: var(--accent);
+  border: 1px solid var(--border-accent);
+}
+
+.bypass-card--full .bypass-card__badge {
+  background: var(--orange-dim);
+  color: var(--orange);
+  border: 1px solid rgba(255, 169, 77, 0.25);
+}
+
+.bypass-card__title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.bypass-card__desc {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 12px;
+}
+
+.bypass-card__used-by {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.bypass-card__used-by strong {
+  color: var(--text-secondary);
+}
+
+/* ========================================
+   BRIDGE / TRANSITION CALLOUT
+   ======================================== */
+.bridge-callout {
+  margin: 48px 0 0;
+  padding: 32px;
+  background: linear-gradient(135deg, rgba(0, 245, 160, 0.04), rgba(77, 171, 247, 0.04));
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-lg);
+  position: relative;
+  overflow: hidden;
+}
+
+.bridge-callout::before {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--blue), var(--accent));
+}
+
+.bridge-callout__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent-dim);
+  margin-bottom: 12px;
+}
+
+.bridge-callout p {
+  color: var(--text-primary);
+  font-size: 16px;
+  line-height: 1.6;
+  margin-bottom: 0;
+}
+
+.bridge-callout p strong {
+  color: var(--accent);
+}
+
+/* ========================================
+   NEXT / PREV PART CTA
+   ======================================== */
+.nav-cta {
+  margin-top: 80px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+@media (min-width: 480px) {
+  .nav-cta {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.nav-cta__card {
+  padding: 28px 24px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: relative;
+  overflow: hidden;
+  text-decoration: none;
+  transition: border-color 200ms ease, box-shadow 200ms ease, transform 200ms ease;
+  cursor: pointer;
+}
+
+.nav-cta__card:hover {
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow-glow);
+  transform: translateY(-2px);
+}
+
+.nav-cta__card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+}
+
+.nav-cta__card--prev {
+  text-align: left;
+}
+
+.nav-cta__card--next {
+  text-align: right;
+}
+
+.nav-cta__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.nav-cta__title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.nav-cta__link-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.nav-cta__card--next .nav-cta__link-row {
+  justify-content: flex-end;
+}
+
+.nav-cta__link-row svg {
+  transition: transform 200ms ease;
+}
+
+.nav-cta__card--prev:hover .nav-cta__link-row svg {
+  transform: translateX(-3px);
+}
+
+.nav-cta__card--next:hover .nav-cta__link-row svg {
+  transform: translateX(3px);
+}
+
+/* ========================================
+   FOOTER
+   ======================================== */
+.page-footer {
+  margin-top: 60px;
+  padding-top: 32px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+.page-footer p {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.8;
+}
+
+.page-footer a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.page-footer a:hover {
+  text-decoration: underline;
+}
+
+/* ========================================
+   SCROLL ANIMATIONS
+   ======================================== */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 600ms ease, transform 600ms ease;
+}
+
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.reveal-delay-1 { transition-delay: 100ms; }
+.reveal-delay-2 { transition-delay: 200ms; }
+.reveal-delay-3 { transition-delay: 300ms; }
+.reveal-delay-4 { transition-delay: 400ms; }
+
+/* ========================================
+   FOCUS STYLES
+   ======================================== */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ========================================
+   SELECTION
+   ======================================== */
+::selection {
+  background: var(--accent-glow-strong);
+  color: var(--text-primary);
+}
+
+/* ========================================
+   DECORATIVE BACKGROUND
+   ======================================== */
+.bg-grid {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: -1;
+  background-image:
+    radial-gradient(circle at 50% 0%, rgba(0, 245, 160, 0.03) 0%, transparent 50%),
+    linear-gradient(rgba(30, 42, 58, 0.15) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30, 42, 58, 0.15) 1px, transparent 1px);
+  background-size: 100% 100%, 60px 60px, 60px 60px;
+  mask-image: radial-gradient(ellipse at center top, black 0%, transparent 70%);
+  -webkit-mask-image: radial-gradient(ellipse at center top, black 0%, transparent 70%);
+}
+
+/* ========================================
+   RESPONSIVE UTILITIES
+   ======================================== */
+.mobile-only {
+  display: block;
+}
+
+@media (min-width: 640px) {
+  .mobile-only { display: none; }
+}
+
+.desktop-only {
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .desktop-only { display: block; }
+}
+
+/* ========================================
+   INLINE SEMANTIC LIST
+   ======================================== */
+.inline-list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.inline-list li {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
+/* ========================================
+   KEY POINT MARKER
+   ======================================== */
+.key-point {
+  background: var(--bg-highlight);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-md);
+  padding: 20px 24px;
+  margin: 28px 0;
+  position: relative;
+}
+
+.key-point::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), transparent);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+.key-point__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+
+.key-point p {
+  color: var(--text-primary);
+  margin-bottom: 0;
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.key-point p strong {
+  color: var(--accent);
+}
+
+/* ========================================
+   SVG ANIMATED RING
+   ======================================== */
+@keyframes dma-glow {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+.dma-pulse {
+  animation: dma-glow 2s ease-in-out infinite;
+}
+
+/* ========================================
+   ELIMINATION HERO BANNER
+   ======================================== */
+.elim-hero {
+  margin: 40px 0;
+  padding: 28px 24px;
+  background: linear-gradient(135deg, rgba(0, 245, 160, 0.06), rgba(0, 245, 160, 0.02));
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-lg);
+  text-align: center;
+}
+
+.elim-hero__steps {
+  font-family: var(--font-mono);
+  font-size: 36px;
+  font-weight: 700;
+  color: var(--accent);
+  text-shadow: 0 0 30px var(--accent-glow-strong);
+  margin-bottom: 4px;
+}
+
+.elim-hero__label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.elim-hero__detail {
+  font-size: 14px;
+  color: var(--text-secondary);
+  max-width: 500px;
+  margin: 0 auto;
+  line-height: 1.5;
+}
+
+.elim-hero__detail strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* ========================================
+   BULLET LIST STYLED
+   ======================================== */
+.bullet-list {
+  list-style: none;
+  margin: 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bullet-list li {
+  font-size: 15px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.bullet-list li::before {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent-dim);
+  margin-top: 10px;
+  flex-shrink: 0;
+}
+
+.bullet-list li strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.bullet-list li code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--bg-code);
+  color: var(--text-code);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+</style>
+</head>
+<body>
+
+<!-- Background grid -->
+<div class="bg-grid" aria-hidden="true"></div>
+
+<!-- Series navigation -->
+<nav class="series-nav" role="navigation" aria-label="Series navigation">
+  <div class="series-nav__left">
+    <span class="series-nav__label">Part 6 of 7</span>
+    <span class="series-nav__title">Linux Networking for Agave Validators</span>
+  </div>
+  <div class="series-nav__right">
+    <div class="series-nav__progress" aria-label="Series progress">
+      <div class="series-nav__dot series-nav__dot--done" aria-label="Part 1, complete"></div>
+      <div class="series-nav__dot series-nav__dot--done" aria-label="Part 2, complete"></div>
+      <div class="series-nav__dot series-nav__dot--done" aria-label="Part 3, complete"></div>
+      <div class="series-nav__dot series-nav__dot--done" aria-label="Part 4, complete"></div>
+      <div class="series-nav__dot series-nav__dot--done" aria-label="Part 5, complete"></div>
+      <div class="series-nav__dot series-nav__dot--active" aria-label="Part 6, current"></div>
+      <div class="series-nav__dot series-nav__dot--future" aria-label="Part 7"></div>
+    </div>
+    <div class="series-nav__links">
+      <a href="part5-xdp.html" class="series-nav__link">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        Prev
+      </a>
+      <a href="part7-big-picture.html" class="series-nav__link">
+        Next
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<!-- Reading progress bar -->
+<div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+<main class="page-wrapper">
+  <div class="container">
+
+    <!-- ============================
+         HERO
+         ============================ -->
+    <header class="hero">
+      <div class="hero__part-label">Part 6</div>
+      <h1 class="hero__title">Zero-Copy Rings That Bypass<br>the <span>Kernel Entirely</span></h1>
+      <p class="hero__subtitle">
+        XDP filters bad packets before the kernel sees them. <strong>AF_XDP eliminates the kernel path for good packets too. This is the full kernel bypass.</strong>
+      </p>
+    </header>
+
+    <!-- ============================
+         SECTION 1: THE CULMINATION
+         ============================ -->
+    <section class="section reveal" id="culmination">
+      <div class="section__number">01</div>
+      <h2 class="section__heading">The Culmination</h2>
+
+      <p>
+        Part 5 showed XDP attaching eBPF programs at the NIC driver, before the kernel allocates
+        a single <code>sk_buff</code>. With <code>XDP_DROP</code>, spam packets vanish at line
+        rate. With <code>XDP_PASS</code>, legitimate traffic still flows through the kernel's full
+        networking stack.
+      </p>
+      <p>
+        That is half the story. Dropping bad traffic is necessary, but for a Solana validator
+        processing millions of packets per second, the kernel stack is still the bottleneck for
+        <strong>good</strong> traffic. The protocol parsing, socket lookup, queue management,
+        buffer copies, and syscalls from Parts 2 and 3 all apply to every packet that passes
+        through.
+      </p>
+      <p>
+        <strong>AF_XDP closes the loop.</strong> It creates a shared-memory channel between the NIC
+        and your application. Packets land in memory that userspace already owns. No kernel data
+        structures. No copies. No syscalls on the hot path.
+      </p>
+    </section>
+
+    <!-- ============================
+         SECTION 2: WHAT AF_XDP IS
+         ============================ -->
+    <section class="section reveal" id="what-is-afxdp">
+      <div class="section__number">02</div>
+      <h2 class="section__heading">What AF_XDP Is</h2>
+
+      <p>
+        AF_XDP (Address Family XDP) is a socket type, also called <strong>XSK</strong> (XDP Socket).
+        It creates a shared memory channel between the NIC driver and userspace. The key idea:
+        packets the NIC writes via DMA are the same bytes the application reads. No intermediate
+        copies. No kernel data structures on the critical path.
+      </p>
+
+      <ol class="steps-list reveal">
+        <li>
+          <span class="steps-list__num">1</span>
+          <span class="steps-list__text"><strong>Userspace allocates UMEM</strong>, a large contiguous memory region for packet frames</span>
+        </li>
+        <li>
+          <span class="steps-list__num">2</span>
+          <span class="steps-list__text"><strong>UMEM is registered</strong> with the kernel and NIC driver</span>
+        </li>
+        <li>
+          <span class="steps-list__num">3</span>
+          <span class="steps-list__text"><strong>NIC's DMA writes packets</strong> directly into UMEM buffers</span>
+        </li>
+        <li>
+          <span class="steps-list__num">4</span>
+          <span class="steps-list__text"><strong>XDP program redirects</strong> packets to the AF_XDP socket via <code>XDP_REDIRECT</code></span>
+        </li>
+        <li>
+          <span class="steps-list__num">5</span>
+          <span class="steps-list__text"><strong>Userspace reads packet data from UMEM</strong>: no copy, the data is already there</span>
+        </li>
+      </ol>
+
+      <div class="key-point reveal">
+        <div class="key-point__label">The core insight</div>
+        <p>
+          The packet bytes the NIC DMA'd are the <strong>same bytes</strong> the application reads.
+          Zero copies. Zero <code>sk_buff</code> allocations. Zero syscalls on the data path.
+        </p>
+      </div>
+    </section>
+
+    <!-- ============================
+         SECTION 3: UMEM
+         ============================ -->
+    <section class="section reveal" id="umem">
+      <div class="section__number">03</div>
+      <h2 class="section__heading">UMEM: The Shared Memory Region</h2>
+
+      <p>
+        UMEM is a pre-allocated pool of packet-sized frames. It is the foundation of AF_XDP's
+        zero-copy design. The same physical memory pages are mapped into both kernel and userspace
+        address spaces. Two virtual addresses, one set of physical pages.
+      </p>
+
+      <ul class="bullet-list">
+        <li><strong>Contiguous memory</strong>, <code>mmap</code>'d by userspace at startup</li>
+        <li>Divided into <strong>equal-sized frames</strong>, typically 4096 bytes each</li>
+        <li>Mapped into <strong>both kernel and userspace</strong> address spaces simultaneously</li>
+        <li>Same physical pages, two virtual mappings: this is what makes zero-copy possible</li>
+        <li>For a validator: <strong>~8192 frames = 32MB</strong> UMEM</li>
+        <li>Allocated once at startup, <strong>never freed</strong> during operation</li>
+      </ul>
+
+      <!-- UMEM frame grid visual -->
+      <div class="umem-visual reveal" id="umemVisual">
+        <div class="umem-visual__title">UMEM Frame Pool</div>
+        <div class="umem-visual__subtitle">64 of ~8,192 frames shown. Hover to inspect.</div>
+        <div class="umem-grid" id="umemGrid" aria-label="UMEM frame visualization showing frame states">
+          <!-- Frames inserted by JS -->
+        </div>
+        <div class="umem-legend">
+          <div class="umem-legend__item">
+            <div class="umem-legend__swatch umem-legend__swatch--empty"></div>
+            <span>Empty (on FILL ring)</span>
+          </div>
+          <div class="umem-legend__item">
+            <div class="umem-legend__swatch umem-legend__swatch--fill"></div>
+            <span>Being DMA'd</span>
+          </div>
+          <div class="umem-legend__item">
+            <div class="umem-legend__swatch umem-legend__swatch--rx"></div>
+            <span>Ready (on RX ring)</span>
+          </div>
+          <div class="umem-legend__item">
+            <div class="umem-legend__swatch umem-legend__swatch--processing"></div>
+            <span>Processing</span>
+          </div>
+        </div>
+        <div class="umem-stats">
+          <div class="umem-stat">
+            <div class="umem-stat__val">4 KB</div>
+            <div class="umem-stat__label">Frame Size</div>
+          </div>
+          <div class="umem-stat">
+            <div class="umem-stat__val">8,192</div>
+            <div class="umem-stat__label">Frames</div>
+          </div>
+          <div class="umem-stat">
+            <div class="umem-stat__val">32 MB</div>
+            <div class="umem-stat__label">Total UMEM</div>
+          </div>
+          <div class="umem-stat">
+            <div class="umem-stat__val">0</div>
+            <div class="umem-stat__label">Copies</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="analogy reveal">
+        <div class="analogy__label">Analogy</div>
+        <p>
+          Think of UMEM as a shared whiteboard in a room with two doors. The NIC writes on the
+          board through one door. Your application reads it through the other. Nobody carries a
+          copy between rooms, because there is only <strong>one board</strong>.
+        </p>
+      </div>
+    </section>
+
+    <!-- ============================
+         SECTION 4: THE FOUR RINGS
+         ============================ -->
+    <section class="section reveal" id="four-rings">
+      <div class="section__number">04</div>
+      <h2 class="section__heading">The Four Rings</h2>
+
+      <p>
+        AF_XDP replaces the kernel's socket queues, spinlocks, and syscalls with four lock-free
+        ring buffers. Each ring is SPSC (single-producer, single-consumer). One side writes, one
+        side reads. No locks needed: memory barriers (atomic operations) handle synchronization
+        at ~5-10ns versus a spinlock's 200-1000ns under contention.
+      </p>
+
+      <!-- Animated ring diagram -->
+      <div class="rings-visual reveal" id="ringsVisual">
+        <div class="rings-visual__header">
+          <div class="rings-visual__header-label">Core Mechanism</div>
+          <div class="rings-visual__header-title">Four Lock-Free Rings</div>
+        </div>
+        <div class="rings-visual__body">
+          <!-- SVG Ring Diagram -->
+          <div class="ring-diagram">
+            <svg viewBox="0 0 520 440" xmlns="http://www.w3.org/2000/svg" aria-label="AF_XDP four ring buffer lifecycle diagram">
+              <defs>
+                <!-- Arrowhead markers -->
+                <marker id="arrowFill" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                  <polygon points="0 0, 8 3, 0 6" fill="#4dabf7"/>
+                </marker>
+                <marker id="arrowRx" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                  <polygon points="0 0, 8 3, 0 6" fill="#00f5a0"/>
+                </marker>
+                <marker id="arrowTx" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                  <polygon points="0 0, 8 3, 0 6" fill="#ffa94d"/>
+                </marker>
+                <marker id="arrowComp" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                  <polygon points="0 0, 8 3, 0 6" fill="#b197fc"/>
+                </marker>
+
+                <!-- Glow filters -->
+                <filter id="glowGreen" x="-30%" y="-30%" width="160%" height="160%">
+                  <feGaussianBlur stdDeviation="4" result="blur"/>
+                  <feMerge>
+                    <feMergeNode in="blur"/>
+                    <feMergeNode in="SourceGraphic"/>
+                  </feMerge>
+                </filter>
+                <filter id="glowBlue" x="-30%" y="-30%" width="160%" height="160%">
+                  <feGaussianBlur stdDeviation="3" result="blur"/>
+                  <feMerge>
+                    <feMergeNode in="blur"/>
+                    <feMergeNode in="SourceGraphic"/>
+                  </feMerge>
+                </filter>
+
+                <!-- Motion paths for animateMotion (SMIL) -->
+                <!-- RX path: right arc, kernel (bottom) -> userspace (top) -->
+                <path id="rxArcPath" d="M 260 380 A 160 160 0 0 0 260 60" fill="none"/>
+                <!-- FILL path: left arc, userspace (top) -> kernel (bottom) -->
+                <path id="fillArcPath" d="M 260 60 A 160 160 0 0 0 260 380" fill="none"/>
+              </defs>
+
+              <!-- Zone labels -->
+              <text x="260" y="30" text-anchor="middle" fill="#5a6478" font-family="'JetBrains Mono', monospace" font-size="10" font-weight="600" letter-spacing="0.12em">USERSPACE</text>
+              <text x="260" y="430" text-anchor="middle" fill="#5a6478" font-family="'JetBrains Mono', monospace" font-size="10" font-weight="600" letter-spacing="0.12em">KERNEL / NIC</text>
+
+              <!-- Main ring ellipse (dashed, subtle) -->
+              <ellipse cx="260" cy="220" rx="160" ry="160" fill="none" stroke="#1e2a3a" stroke-width="2" stroke-dasharray="6 4"/>
+
+              <!-- RX ring arc (right side: kernel -> userspace) -->
+              <path d="M 260 380 A 160 160 0 0 1 260 60" fill="none" stroke="#00f5a0" stroke-width="3" stroke-opacity="0.4" stroke-linecap="round"/>
+
+              <!-- FILL ring arc (left side: userspace -> kernel) -->
+              <path d="M 260 60 A 160 160 0 0 1 260 380" fill="none" stroke="#4dabf7" stroke-width="3" stroke-opacity="0.4" stroke-linecap="round"/>
+
+              <!-- Ring node: Userspace (top) -->
+              <rect x="195" y="40" width="130" height="40" rx="8" fill="#131927" stroke="#00f5a0" stroke-width="1.5"/>
+              <text x="260" y="65" text-anchor="middle" fill="#00f5a0" font-family="'JetBrains Mono', monospace" font-size="12" font-weight="600">App (AF_XDP)</text>
+
+              <!-- Ring node: Kernel/NIC (bottom) -->
+              <rect x="195" y="362" width="130" height="40" rx="8" fill="#131927" stroke="#4dabf7" stroke-width="1.5"/>
+              <text x="260" y="387" text-anchor="middle" fill="#4dabf7" font-family="'JetBrains Mono', monospace" font-size="12" font-weight="600">NIC + DMA</text>
+
+              <!-- FILL ring label (left) -->
+              <g transform="translate(60, 210)">
+                <rect x="-5" y="-14" width="80" height="28" rx="6" fill="rgba(77, 171, 247, 0.12)" stroke="rgba(77, 171, 247, 0.3)" stroke-width="1"/>
+                <text x="35" y="4" text-anchor="middle" fill="#4dabf7" font-family="'JetBrains Mono', monospace" font-size="11" font-weight="600">FILL</text>
+              </g>
+              <!-- FILL direction arrow -->
+              <path d="M 110 240 L 110 270" fill="none" stroke="#4dabf7" stroke-width="1.5" marker-end="url(#arrowFill)" stroke-opacity="0.6"/>
+
+              <!-- RX ring label (right) -->
+              <g transform="translate(385, 210)">
+                <rect x="-5" y="-14" width="60" height="28" rx="6" fill="rgba(0, 245, 160, 0.12)" stroke="rgba(0, 245, 160, 0.3)" stroke-width="1"/>
+                <text x="25" y="4" text-anchor="middle" fill="#00f5a0" font-family="'JetBrains Mono', monospace" font-size="11" font-weight="600">RX</text>
+              </g>
+              <!-- RX direction arrow -->
+              <path d="M 415 200 L 415 170" fill="none" stroke="#00f5a0" stroke-width="1.5" marker-end="url(#arrowRx)" stroke-opacity="0.6"/>
+
+              <!-- TX/COMPLETION labels on inner side -->
+              <!-- TX ring (inner left-bottom) -->
+              <g transform="translate(175, 300)">
+                <rect x="-5" y="-12" width="50" height="24" rx="5" fill="rgba(255, 169, 77, 0.12)" stroke="rgba(255, 169, 77, 0.3)" stroke-width="1"/>
+                <text x="20" y="4" text-anchor="middle" fill="#ffa94d" font-family="'JetBrains Mono', monospace" font-size="10" font-weight="600">TX</text>
+              </g>
+
+              <!-- COMPLETION ring (inner right-bottom) -->
+              <g transform="translate(295, 300)">
+                <rect x="-5" y="-12" width="72" height="24" rx="5" fill="rgba(177, 151, 252, 0.12)" stroke="rgba(177, 151, 252, 0.3)" stroke-width="1"/>
+                <text x="31" y="4" text-anchor="middle" fill="#b197fc" font-family="'JetBrains Mono', monospace" font-size="10" font-weight="600">COMP</text>
+              </g>
+
+              <!-- TX/COMP inner flow arrows -->
+              <path d="M 200 312 L 220 340" fill="none" stroke="#ffa94d" stroke-width="1.5" marker-end="url(#arrowTx)" stroke-opacity="0.5"/>
+              <path d="M 330 340 L 350 312" fill="none" stroke="#b197fc" stroke-width="1.5" marker-end="url(#arrowComp)" stroke-opacity="0.5"/>
+
+              <!-- DMA glow indicator at bottom -->
+              <circle cx="260" cy="382" r="6" fill="#4dabf7" opacity="0.4" class="dma-pulse"/>
+
+              <!-- Animated packet dots on RX path (right arc, kernel -> userspace) -->
+              <circle r="5" fill="#00f5a0" filter="url(#glowGreen)">
+                <title>Received packet descriptor moving to userspace</title>
+                <animateMotion dur="4s" repeatCount="indefinite" begin="0s">
+                  <mpath href="#rxArcPath"/>
+                </animateMotion>
+              </circle>
+              <circle r="5" fill="#00f5a0" filter="url(#glowGreen)">
+                <title>Received packet descriptor moving to userspace</title>
+                <animateMotion dur="4s" repeatCount="indefinite" begin="1.3s">
+                  <mpath href="#rxArcPath"/>
+                </animateMotion>
+              </circle>
+              <circle r="5" fill="#00f5a0" filter="url(#glowGreen)">
+                <title>Received packet descriptor moving to userspace</title>
+                <animateMotion dur="4s" repeatCount="indefinite" begin="2.6s">
+                  <mpath href="#rxArcPath"/>
+                </animateMotion>
+              </circle>
+
+              <!-- Animated packet dots on FILL path (left arc, userspace -> kernel) -->
+              <circle r="4" fill="#4dabf7" filter="url(#glowBlue)">
+                <title>Empty frame address returned to kernel</title>
+                <animateMotion dur="4s" repeatCount="indefinite" begin="0.5s">
+                  <mpath href="#fillArcPath"/>
+                </animateMotion>
+              </circle>
+              <circle r="4" fill="#4dabf7" filter="url(#glowBlue)">
+                <title>Empty frame address returned to kernel</title>
+                <animateMotion dur="4s" repeatCount="indefinite" begin="2s">
+                  <mpath href="#fillArcPath"/>
+                </animateMotion>
+              </circle>
+              <circle r="4" fill="#4dabf7" filter="url(#glowBlue)">
+                <title>Empty frame address returned to kernel</title>
+                <animateMotion dur="4s" repeatCount="indefinite" begin="3.2s">
+                  <mpath href="#fillArcPath"/>
+                </animateMotion>
+              </circle>
+
+              <!-- Center UMEM label -->
+              <rect x="218" y="202" width="84" height="36" rx="6" fill="#0d1219" stroke="#1e2a3a" stroke-width="1"/>
+              <text x="260" y="225" text-anchor="middle" fill="#8a94a8" font-family="'JetBrains Mono', monospace" font-size="12" font-weight="600">UMEM</text>
+            </svg>
+          </div>
+
+          <!-- Ring cards -->
+          <div class="ring-cards">
+            <div class="ring-card ring-card--fill">
+              <div class="ring-card__name">FILL Ring</div>
+              <div class="ring-card__direction">Userspace -> Kernel</div>
+              <div class="ring-card__desc">Userspace pushes addresses of empty UMEM frames: "here are buffers you can DMA into."</div>
+            </div>
+            <div class="ring-card ring-card--rx">
+              <div class="ring-card__name">RX Ring</div>
+              <div class="ring-card__direction">Kernel -> Userspace</div>
+              <div class="ring-card__desc">Kernel pushes descriptors: "frame at UMEM offset X has a packet of length Y."</div>
+            </div>
+            <div class="ring-card ring-card--tx">
+              <div class="ring-card__name">TX Ring</div>
+              <div class="ring-card__direction">Userspace -> Kernel</div>
+              <div class="ring-card__desc">Userspace pushes descriptors of packets to send through the NIC.</div>
+            </div>
+            <div class="ring-card ring-card--comp">
+              <div class="ring-card__name">COMPLETION Ring</div>
+              <div class="ring-card__direction">Kernel -> Userspace</div>
+              <div class="ring-card__desc">Kernel returns addresses of completed TX buffers, ready for reuse.</div>
+            </div>
+          </div>
+
+          <!-- Receive cycle steps -->
+          <div class="cycle-steps">
+            <div class="cycle-steps__title">Receive Flow Lifecycle</div>
+            <div class="cycle-flow">
+              <div class="cycle-step">
+                <div class="cycle-step__dot"></div>
+                <div class="cycle-step__num">1.</div>
+                <div class="cycle-step__text">Userspace pushes empty frame addresses to <strong>FILL ring</strong></div>
+              </div>
+              <div class="cycle-step">
+                <div class="cycle-step__dot"></div>
+                <div class="cycle-step__num">2.</div>
+                <div class="cycle-step__text">NIC DMAs packet data into those frames</div>
+              </div>
+              <div class="cycle-step">
+                <div class="cycle-step__dot"></div>
+                <div class="cycle-step__num">3.</div>
+                <div class="cycle-step__text">XDP program returns <code>XDP_REDIRECT</code> to AF_XDP socket</div>
+              </div>
+              <div class="cycle-step">
+                <div class="cycle-step__dot"></div>
+                <div class="cycle-step__num">4.</div>
+                <div class="cycle-step__text">Kernel pushes filled descriptor to <strong>RX ring</strong></div>
+              </div>
+              <div class="cycle-step">
+                <div class="cycle-step__dot"></div>
+                <div class="cycle-step__num">5.</div>
+                <div class="cycle-step__text">Userspace reads descriptor, processes packet data at that UMEM offset</div>
+              </div>
+              <div class="cycle-step">
+                <div class="cycle-step__dot"></div>
+                <div class="cycle-step__num">6.</div>
+                <div class="cycle-step__text">When done, pushes frame address back to <strong>FILL ring</strong> for reuse</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Lock-free note -->
+          <div class="ring-lock-note">
+            All four rings are SPSC (single-producer, single-consumer). <strong>No locks.</strong> Memory barriers sync at ~5-10ns vs spinlock's 200-1000ns under contention.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================
+         SECTION 5: AF_XDP OBJECTS
+         ============================ -->
+    <section class="section reveal" id="objects">
+      <div class="section__number">05</div>
+      <h2 class="section__heading">AF_XDP Objects</h2>
+
+      <p>
+        Four components make up the AF_XDP machinery. Together they replace the entire kernel
+        socket subsystem for the traffic that needs maximum throughput.
+      </p>
+
+      <div class="objects-grid reveal">
+        <div class="object-card object-card--xsk">
+          <div class="object-card__icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+          </div>
+          <div class="object-card__name">XSK (XDP Socket)</div>
+          <div class="object-card__desc">AF_XDP socket bound to a specific network device and hardware queue. The entry point for the bypass path.</div>
+        </div>
+        <div class="object-card object-card--umem">
+          <div class="object-card__icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="2" width="20" height="20" rx="2"/>
+              <path d="M7 2v20M17 2v20M2 12h20M2 7h20M2 17h20"/>
+            </svg>
+          </div>
+          <div class="object-card__name">UMEM</div>
+          <div class="object-card__desc">Userspace-owned packet frame memory registered with the kernel. The shared buffer pool both sides read and write.</div>
+        </div>
+        <div class="object-card object-card--rx">
+          <div class="object-card__icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/>
+              <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
+            </svg>
+          </div>
+          <div class="object-card__name">RX / FILL Rings</div>
+          <div class="object-card__desc">Userspace supplies free frames via FILL. Kernel returns received packet descriptors via RX. The inbound data path.</div>
+        </div>
+        <div class="object-card object-card--tx">
+          <div class="object-card__icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+          </div>
+          <div class="object-card__name">TX / COMPLETION Rings</div>
+          <div class="object-card__desc">Userspace submits frames to send via TX. Kernel reports completions. The outbound data path.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================
+         SECTION 6: WHAT AF_XDP ELIMINATES
+         ============================ -->
+    <section class="section reveal" id="eliminates">
+      <div class="section__number">06</div>
+      <h2 class="section__heading">What AF_XDP Eliminates</h2>
+
+      <p>
+        For redirected frames, steps 6 through 13 of the classic packet path (from Part 2) are
+        <strong>all skipped</strong>. No <code>sk_buff</code> is ever allocated. No protocol
+        parsing. No netfilter hooks. No syscalls.
+      </p>
+
+      <div class="elim-hero reveal">
+        <div class="elim-hero__steps">Steps 6-13</div>
+        <div class="elim-hero__label">Skipped for redirected frames</div>
+        <div class="elim-hero__detail">
+          Every cost center from the classic path is gone. The NIC writes data into UMEM.
+          Your application reads it. <strong>Nothing happens in between.</strong>
+        </div>
+      </div>
+
+      <div class="elim-table-wrap reveal">
+        <table class="elim-table" role="table">
+          <thead>
+            <tr>
+              <th scope="col">Classic Path Cost</th>
+              <th scope="col">AF_XDP</th>
+              <th scope="col">Gone?</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>sk_buff alloc/free</td>
+              <td>Never created</td>
+              <td><span class="check-yes" aria-label="Eliminated"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span></td>
+            </tr>
+            <tr>
+              <td>IP / UDP / netfilter</td>
+              <td>Skipped entirely</td>
+              <td><span class="check-yes" aria-label="Eliminated"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span></td>
+            </tr>
+            <tr>
+              <td>Socket hash lookup</td>
+              <td>XDP routes explicitly</td>
+              <td><span class="check-yes" aria-label="Eliminated"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span></td>
+            </tr>
+            <tr>
+              <td>Socket queue spinlock</td>
+              <td>Lock-free SPSC rings</td>
+              <td><span class="check-yes" aria-label="Eliminated"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span></td>
+            </tr>
+            <tr>
+              <td>recvmsg syscall</td>
+              <td>Userspace polls ring</td>
+              <td><span class="check-yes" aria-label="Eliminated"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span></td>
+            </tr>
+            <tr>
+              <td>copy_to_user</td>
+              <td>Data already in UMEM</td>
+              <td><span class="check-yes" aria-label="Eliminated"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============================
+         SECTION 7: ZERO-COPY vs COPY MODE
+         ============================ -->
+    <section class="section reveal" id="copy-modes">
+      <div class="section__number">07</div>
+      <h2 class="section__heading">Zero-Copy vs Copy Mode</h2>
+
+      <p>
+        AF_XDP supports two modes of operation. The difference is where the NIC's DMA writes
+        packet data. Both modes are dramatically faster than the classic kernel path, but
+        zero-copy removes the last remaining copy.
+      </p>
+
+      <div class="mode-compare reveal">
+        <div class="mode-card mode-card--zero">
+          <div class="mode-card__badge">Optimal</div>
+          <div class="mode-card__title">Zero-Copy Mode</div>
+          <div class="mode-card__desc">
+            NIC DMAs directly into UMEM frames. The DMA buffer <strong>is</strong> the UMEM frame.
+            No copy at any stage. This is the fastest possible path: NIC writes, application reads,
+            same physical memory.
+          </div>
+          <div class="mode-card__drivers">
+            <strong>Requires driver support:</strong> mlx5, ice, i40e, ixgbe
+          </div>
+        </div>
+        <div class="mode-card mode-card--copy">
+          <div class="mode-card__badge">Fallback</div>
+          <div class="mode-card__title">Copy Mode</div>
+          <div class="mode-card__desc">
+            Kernel copies from the driver's DMA buffer into UMEM. One memcpy. Still avoids
+            <code>sk_buff</code> allocation, protocol stack, netfilter, and syscalls. Much faster
+            than classic.
+          </div>
+          <div class="mode-card__drivers">
+            <strong>Fallback for unsupported drivers.</strong> Still skips steps 7-14.
+          </div>
+        </div>
+      </div>
+
+      <div class="analogy reveal">
+        <div class="analogy__label">Comparison</div>
+        <p>
+          Even copy mode is a massive win over the classic path. The classic path pays for
+          <code>sk_buff</code> allocation, IP parsing, UDP demux, netfilter, socket lookup,
+          queue spinlock, <code>recvmsg</code>, and <code>copy_to_user</code>. Copy-mode AF_XDP
+          pays for <strong>one memcpy</strong>. Everything else is gone.
+        </p>
+      </div>
+    </section>
+
+    <!-- ============================
+         SECTION 8: FULL vs SELECTIVE BYPASS
+         ============================ -->
+    <section class="section reveal" id="bypass-modes">
+      <div class="section__number">08</div>
+      <h2 class="section__heading">Full vs Selective Bypass</h2>
+
+      <p>
+        Not all traffic needs kernel bypass. SSH connections need the kernel's TCP stack.
+        Gossip runs at low enough rates that the classic path handles it fine. The power
+        of AF_XDP combined with XDP is selective: each packet class gets the right treatment.
+      </p>
+
+      <div class="bypass-compare reveal">
+        <div class="bypass-card bypass-card--selective">
+          <div class="bypass-card__badge">Pragmatic</div>
+          <div class="bypass-card__title">Selective Bypass</div>
+          <div class="bypass-card__desc">
+            XDP classifies each packet. High-throughput streams get <code>XDP_REDIRECT</code>
+            to AF_XDP. Low-rate or TCP-dependent traffic gets <code>XDP_PASS</code> to the
+            normal stack. Spam gets <code>XDP_DROP</code>.
+          </div>
+          <div class="bypass-card__used-by">
+            <strong>Used by:</strong> Agave (what a production validator would do)
+          </div>
+        </div>
+        <div class="bypass-card bypass-card--full">
+          <div class="bypass-card__badge">Maximum Performance</div>
+          <div class="bypass-card__title">Full Bypass</div>
+          <div class="bypass-card__desc">
+            Every packet on the interface goes through AF_XDP. Maximum throughput, but you lose
+            all kernel networking features. Closer to DPDK territory. Must implement your own
+            protocol stack.
+          </div>
+          <div class="bypass-card__used-by">
+            <strong>Used by:</strong> Firedancer
+          </div>
+        </div>
+      </div>
+
+      <!-- Routing visual -->
+      <div class="routing-visual reveal">
+        <div class="routing-visual__header">
+          <div class="routing-visual__header-label">Selective Bypass: Agave Packet Routing</div>
+        </div>
+        <div class="routing-rows">
+          <div class="routing-row routing-row--redirect">
+            <div class="routing-row__source">Turbine shreds</div>
+            <div class="routing-row__arrow">XDP_REDIRECT</div>
+            <div class="routing-row__dest"><strong>AF_XDP socket 0</strong> (zero-copy fast path)</div>
+          </div>
+          <div class="routing-row routing-row--redirect">
+            <div class="routing-row__source">QUIC transactions</div>
+            <div class="routing-row__arrow">XDP_REDIRECT</div>
+            <div class="routing-row__dest"><strong>AF_XDP socket 1</strong> (zero-copy fast path)</div>
+          </div>
+          <div class="routing-row routing-row--pass">
+            <div class="routing-row__source">Gossip</div>
+            <div class="routing-row__arrow">XDP_PASS</div>
+            <div class="routing-row__dest">Normal kernel stack (fine for low rate)</div>
+          </div>
+          <div class="routing-row routing-row--pass">
+            <div class="routing-row__source">SSH / management</div>
+            <div class="routing-row__arrow">XDP_PASS</div>
+            <div class="routing-row__dest">Normal kernel stack (needs TCP)</div>
+          </div>
+          <div class="routing-row routing-row--drop">
+            <div class="routing-row__source">Spam</div>
+            <div class="routing-row__arrow">XDP_DROP</div>
+            <div class="routing-row__dest">Gone</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================
+         SECTION 9: ARCHITECTURE DIAGRAM
+         ============================ -->
+    <section class="section reveal" id="architecture">
+      <div class="section__number">09</div>
+      <h2 class="section__heading">The Architecture</h2>
+
+      <p>
+        Three zones, two paths. The XDP + eBPF layer sits at the driver level and makes the
+        routing decision for every packet. Redirected packets go straight to userspace through
+        shared memory. Everything else flows through the normal kernel stack.
+      </p>
+
+      <div class="arch-visual reveal">
+        <div class="arch-visual__title">AF_XDP Bypass vs Normal Stack</div>
+        <div class="arch-svg-wrap">
+          <svg viewBox="0 0 560 520" xmlns="http://www.w3.org/2000/svg" aria-label="Architecture diagram showing AF_XDP bypass path versus normal kernel stack path">
+            <defs>
+              <marker id="archArrowGreen" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" fill="#00f5a0"/>
+              </marker>
+              <marker id="archArrowBlue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" fill="#4dabf7"/>
+              </marker>
+              <marker id="archArrowRed" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" fill="#ff6b6b"/>
+              </marker>
+              <filter id="archGlowGreen" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="3" result="blur"/>
+                <feMerge>
+                  <feMergeNode in="blur"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+            </defs>
+
+            <!-- Zone backgrounds -->
+            <!-- Userspace zone -->
+            <rect x="20" y="10" width="520" height="120" rx="12" fill="rgba(0, 245, 160, 0.03)" stroke="#1e2a3a" stroke-width="1"/>
+            <text x="40" y="32" fill="#5a6478" font-family="'JetBrains Mono', monospace" font-size="9" font-weight="600" letter-spacing="0.12em">USERSPACE</text>
+
+            <!-- Kernelspace zone -->
+            <rect x="20" y="150" width="520" height="200" rx="12" fill="rgba(77, 171, 247, 0.02)" stroke="#1e2a3a" stroke-width="1"/>
+            <text x="40" y="172" fill="#5a6478" font-family="'JetBrains Mono', monospace" font-size="9" font-weight="600" letter-spacing="0.12em">KERNELSPACE</text>
+
+            <!-- NIC zone -->
+            <rect x="20" y="370" width="520" height="140" rx="12" fill="rgba(255, 169, 77, 0.02)" stroke="#1e2a3a" stroke-width="1"/>
+            <text x="40" y="392" fill="#5a6478" font-family="'JetBrains Mono', monospace" font-size="9" font-weight="600" letter-spacing="0.12em">NIC</text>
+
+            <!-- NIC: Incoming packets -->
+            <rect x="220" y="440" width="120" height="44" rx="8" fill="#131927" stroke="#ffa94d" stroke-width="1.5"/>
+            <text x="280" y="466" text-anchor="middle" fill="#ffa94d" font-family="'JetBrains Mono', monospace" font-size="11" font-weight="600">Packets In</text>
+
+            <!-- NIC: NIC hardware -->
+            <rect x="200" y="395" width="160" height="36" rx="8" fill="#131927" stroke="#1e2a3a" stroke-width="1.5"/>
+            <text x="280" y="418" text-anchor="middle" fill="#8a94a8" font-family="'JetBrains Mono', monospace" font-size="11" font-weight="600">NIC Hardware</text>
+
+            <!-- Arrow: packets -> NIC -->
+            <path d="M 280 440 L 280 435" fill="none" stroke="#ffa94d" stroke-width="1.5" marker-end="url(#archArrowBlue)" stroke-opacity="0.5"/>
+
+            <!-- XDP + eBPF layer -->
+            <rect x="170" y="310" width="220" height="44" rx="8" fill="rgba(0, 245, 160, 0.08)" stroke="#00f5a0" stroke-width="2"/>
+            <text x="280" y="337" text-anchor="middle" fill="#00f5a0" font-family="'JetBrains Mono', monospace" font-size="12" font-weight="700">XDP + eBPF</text>
+
+            <!-- Arrow: NIC -> XDP -->
+            <path d="M 280 395 L 280 358" fill="none" stroke="#8a94a8" stroke-width="1.5" stroke-dasharray="4 3"/>
+
+            <!-- ===== LEFT PATH: AF_XDP BYPASS ===== -->
+            <!-- Arrow from XDP going left-up to AF_XDP app -->
+            <path d="M 220 310 L 160 260" fill="none" stroke="#00f5a0" stroke-width="2.5" marker-end="url(#archArrowGreen)" filter="url(#archGlowGreen)"/>
+
+            <!-- XDP_REDIRECT label -->
+            <text x="135" y="292" fill="#00f5a0" font-family="'JetBrains Mono', monospace" font-size="9" font-weight="600" transform="rotate(-35, 135, 292)">XDP_REDIRECT</text>
+
+            <!-- UMEM shared memory block -->
+            <rect x="80" y="185" width="160" height="48" rx="8" fill="rgba(0, 245, 160, 0.06)" stroke="rgba(0, 245, 160, 0.3)" stroke-width="1.5" stroke-dasharray="6 3"/>
+            <text x="160" y="213" text-anchor="middle" fill="#00c880" font-family="'JetBrains Mono', monospace" font-size="11" font-weight="600">UMEM (Shared Mem)</text>
+
+            <!-- Arrow: UMEM to AF_XDP App -->
+            <path d="M 160 185 L 160 135" fill="none" stroke="#00f5a0" stroke-width="2" marker-end="url(#archArrowGreen)"/>
+
+            <!-- AF_XDP App in userspace (left) -->
+            <rect x="90" y="55" width="140" height="56" rx="10" fill="#131927" stroke="#00f5a0" stroke-width="2"/>
+            <text x="160" y="78" text-anchor="middle" fill="#00f5a0" font-family="'Space Grotesk', sans-serif" font-size="13" font-weight="700">App (AF_XDP)</text>
+            <text x="160" y="98" text-anchor="middle" fill="#5a6478" font-family="'JetBrains Mono', monospace" font-size="9">zero-copy fast path</text>
+
+            <!-- ===== RIGHT PATH: NORMAL STACK ===== -->
+            <!-- Arrow from XDP going right-up to Kernel Stack -->
+            <path d="M 340 310 L 400 260" fill="none" stroke="#4dabf7" stroke-width="2" marker-end="url(#archArrowBlue)"/>
+
+            <!-- XDP_PASS label -->
+            <text x="375" y="292" fill="#4dabf7" font-family="'JetBrains Mono', monospace" font-size="9" font-weight="600" transform="rotate(35, 375, 292)">XDP_PASS</text>
+
+            <!-- Kernel Network Stack -->
+            <rect x="340" y="185" width="160" height="64" rx="8" fill="#131927" stroke="#4dabf7" stroke-width="1.5"/>
+            <text x="420" y="210" text-anchor="middle" fill="#4dabf7" font-family="'JetBrains Mono', monospace" font-size="11" font-weight="600">Network Stack</text>
+            <text x="420" y="228" text-anchor="middle" fill="#5a6478" font-family="'JetBrains Mono', monospace" font-size="9">IP, UDP, netfilter</text>
+            <text x="420" y="242" text-anchor="middle" fill="#5a6478" font-family="'JetBrains Mono', monospace" font-size="9">sk_buff, socket queue</text>
+
+            <!-- Arrow: Stack to App (right) -->
+            <path d="M 420 185 L 420 135" fill="none" stroke="#4dabf7" stroke-width="1.5" marker-end="url(#archArrowBlue)"/>
+
+            <!-- Normal App in userspace (right) -->
+            <rect x="350" y="55" width="140" height="56" rx="10" fill="#131927" stroke="#4dabf7" stroke-width="1.5"/>
+            <text x="420" y="78" text-anchor="middle" fill="#4dabf7" font-family="'Space Grotesk', sans-serif" font-size="13" font-weight="700">App (Socket)</text>
+            <text x="420" y="98" text-anchor="middle" fill="#5a6478" font-family="'JetBrains Mono', monospace" font-size="9">classic kernel path</text>
+
+            <!-- ===== XDP_DROP path ===== -->
+            <!-- Small drop indicator -->
+            <path d="M 280 355 L 280 370" fill="none" stroke="#ff6b6b" stroke-width="1.5" stroke-opacity="0.5"/>
+            <text x="330" y="370" fill="#ff6b6b" font-family="'JetBrains Mono', monospace" font-size="9" font-weight="600" opacity="0.7">XDP_DROP (gone)</text>
+            <line x1="310" y1="364" x2="350" y2="364" stroke="#ff6b6b" stroke-width="1" stroke-opacity="0.4"/>
+          </svg>
+        </div>
+
+        <div class="arch-legend">
+          <div class="arch-legend__item arch-legend__item--bypass">
+            <div class="arch-legend__line arch-legend__line--bypass"></div>
+            <span>AF_XDP bypass (zero-copy)</span>
+          </div>
+          <div class="arch-legend__item arch-legend__item--normal">
+            <div class="arch-legend__line arch-legend__line--normal"></div>
+            <span>Normal kernel stack</span>
+          </div>
+          <div class="arch-legend__item arch-legend__item--drop">
+            <div class="arch-legend__line arch-legend__line--drop"></div>
+            <span>Dropped at driver</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================
+         SECTION 10: BRIDGE
+         ============================ -->
+    <section class="section reveal" id="bridge">
+      <div class="section__number">10</div>
+      <h2 class="section__heading">What Comes Next</h2>
+
+      <div class="bridge-callout">
+        <div class="bridge-callout__label">Bridge to Part 7</div>
+        <p>
+          We now have the complete toolkit: classic UDP for basic operation, XDP for early filtering,
+          AF_XDP for kernel bypass. The final part puts it all together: <strong>comparing the three
+          approaches side-by-side and showing exactly where Agave uses each one in its codebase.</strong>
+        </p>
+      </div>
+    </section>
+
+    <!-- ============================
+         PREV / NEXT PART CTA
+         ============================ -->
+    <div class="nav-cta reveal">
+      <a href="part5-xdp.html" class="nav-cta__card nav-cta__card--prev">
+        <span class="nav-cta__label">Previous: Part 5</span>
+        <span class="nav-cta__title">XDP: The First Hook</span>
+        <span class="nav-cta__link-row">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="19" y1="12" x2="5" y2="12"/>
+            <polyline points="12 19 5 12 12 5"/>
+          </svg>
+          Go back
+        </span>
+      </a>
+      <a href="part7-big-picture.html" class="nav-cta__card nav-cta__card--next">
+        <span class="nav-cta__label">Up Next: Part 7</span>
+        <span class="nav-cta__title">The Big Picture</span>
+        <span class="nav-cta__link-row">
+          Continue
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="5" y1="12" x2="19" y2="12"/>
+            <polyline points="12 5 19 12 12 19"/>
+          </svg>
+        </span>
+      </a>
+    </div>
+
+    <!-- ============================
+         FOOTER
+         ============================ -->
+    <footer class="page-footer">
+      <p>
+        Linux Networking for Agave Validators<br>
+        <a href="https://turbin3.com" target="_blank" rel="noopener">Turbin3</a> Advanced SVM Cohort, Q2 2026
+      </p>
+    </footer>
+
+  </div>
+</main>
+
+<script>
+(function() {
+  'use strict';
+
+  // ============================
+  // Reading Progress Bar
+  // ============================
+  var progressBar = document.getElementById('readingProgress');
+  var ticking = false;
+
+  function updateProgress() {
+    var scrollTop = window.scrollY;
+    var docHeight = document.documentElement.scrollHeight - window.innerHeight;
+    var progress = docHeight > 0 ? (scrollTop / docHeight) * 100 : 0;
+    progressBar.style.width = progress + '%';
+    ticking = false;
+  }
+
+  window.addEventListener('scroll', function() {
+    if (!ticking) {
+      requestAnimationFrame(updateProgress);
+      ticking = true;
+    }
+  }, { passive: true });
+
+  // ============================
+  // UMEM Grid: Generate frames with color-coded states
+  // ============================
+  var umemGrid = document.getElementById('umemGrid');
+  var isMobile = window.innerWidth < 640;
+  var totalFrames = isMobile ? 64 : 64;
+  var stateClasses = ['empty', 'fill', 'rx', 'processing'];
+  // Distribution: ~55% empty, ~15% fill, ~20% rx, ~10% processing
+  var distribution = [];
+  for (var i = 0; i < totalFrames; i++) {
+    var r = Math.random();
+    if (r < 0.55) distribution.push('empty');
+    else if (r < 0.70) distribution.push('fill');
+    else if (r < 0.90) distribution.push('rx');
+    else distribution.push('processing');
+  }
+
+  distribution.forEach(function(state, idx) {
+    var frame = document.createElement('div');
+    frame.className = 'umem-frame umem-frame--' + state;
+    frame.setAttribute('title', 'Frame ' + idx + ' (' + state + ')');
+    frame.setAttribute('aria-label', 'UMEM frame ' + idx + ', state: ' + state);
+    // Stagger animation delay for visual interest
+    if (state !== 'empty') {
+      frame.style.animationDelay = (Math.random() * 2).toFixed(1) + 's';
+    }
+    umemGrid.appendChild(frame);
+  });
+
+  // ============================
+  // UMEM Grid: Cycle frame states periodically
+  // ============================
+  var prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Pause SMIL animations if reduced motion is preferred
+  if (prefersReducedMotion) {
+    document.querySelectorAll('animateMotion').forEach(function(el) {
+      el.setAttribute('dur', 'indefinite');
+    });
+  }
+
+  if (!prefersReducedMotion) {
+    setInterval(function() {
+      var frames = umemGrid.querySelectorAll('.umem-frame');
+      // Pick 3-5 random frames to transition
+      var count = 3 + Math.floor(Math.random() * 3);
+      for (var i = 0; i < count; i++) {
+        var idx = Math.floor(Math.random() * frames.length);
+        var frame = frames[idx];
+        // Remove current state
+        frame.className = 'umem-frame';
+        // Pick new state with realistic transitions
+        var newState = stateClasses[Math.floor(Math.random() * stateClasses.length)];
+        frame.classList.add('umem-frame--' + newState);
+        frame.setAttribute('title', 'Frame ' + idx + ' (' + newState + ')');
+      }
+    }, 2000);
+  }
+
+  // ============================
+  // Scroll Reveal (Intersection Observer)
+  // ============================
+  if (!prefersReducedMotion) {
+    var revealElements = document.querySelectorAll('.reveal');
+    var observer = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, {
+      threshold: 0.1,
+      rootMargin: '0px 0px -60px 0px'
+    });
+
+    revealElements.forEach(function(el) {
+      observer.observe(el);
+    });
+  } else {
+    document.querySelectorAll('.reveal').forEach(function(el) {
+      el.classList.add('visible');
+    });
+  }
+
+})();
+</script>
+</body>
+</html>
