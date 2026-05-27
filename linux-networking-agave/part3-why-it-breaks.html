@@ -1,0 +1,2232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Part 3: Why The Classic Path Breaks at Validator Scale | Linux Networking for Agave Validators</title>
+<meta name="description" content="Part 3 of 7: Quantifying the six CPU cost centers that make the classic Linux kernel packet path collapse at 1M packets per second. From the Turbin3 Advanced SVM cohort.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ========================================
+   CSS CUSTOM PROPERTIES
+   ======================================== */
+:root {
+  --bg-primary: #0a0e17;
+  --bg-secondary: #0f1420;
+  --bg-card: #131927;
+  --bg-card-hover: #1a2236;
+  --bg-code: #0d1219;
+  --bg-highlight: rgba(0, 245, 160, 0.06);
+
+  --accent: #00f5a0;
+  --accent-dim: #00c880;
+  --accent-glow: rgba(0, 245, 160, 0.15);
+  --accent-glow-strong: rgba(0, 245, 160, 0.3);
+
+  --text-primary: #e8ecf4;
+  --text-secondary: #8a94a8;
+  --text-muted: #5a6478;
+  --text-code: #a8d8ea;
+
+  --border: #1e2a3a;
+  --border-accent: rgba(0, 245, 160, 0.2);
+
+  --red: #ff6b6b;
+  --red-dim: rgba(255, 107, 107, 0.12);
+  --orange: #ffa94d;
+  --orange-dim: rgba(255, 169, 77, 0.12);
+  --blue: #4dabf7;
+  --blue-dim: rgba(77, 171, 247, 0.12);
+  --purple: #b197fc;
+  --purple-dim: rgba(177, 151, 252, 0.12);
+  --yellow: #ffd43b;
+  --yellow-dim: rgba(255, 212, 59, 0.12);
+  --cyan: #22d3ee;
+  --cyan-dim: rgba(34, 211, 238, 0.12);
+  --pink: #f472b6;
+  --pink-dim: rgba(244, 114, 182, 0.12);
+
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.3), 0 1px 4px rgba(0, 0, 0, 0.2);
+  --shadow-glow: 0 0 30px rgba(0, 245, 160, 0.08);
+
+  --max-width: 860px;
+  --spacing-unit: 8px;
+}
+
+/* ========================================
+   RESET & BASE
+   ======================================== */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: 17px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  overflow-x: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  html { scroll-behavior: auto; }
+  .bar-fill { transition: none !important; }
+  .syscall-line { animation: none !important; opacity: 1 !important; }
+}
+
+/* ========================================
+   SERIES NAVIGATION BAR
+   ======================================== */
+.series-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: rgba(10, 14, 23, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 24px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.series-nav__left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.series-nav__label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.series-nav__title {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .series-nav__title { display: block; }
+}
+
+.series-nav__progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.series-nav__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: background 200ms ease, box-shadow 200ms ease;
+}
+
+.series-nav__dot--completed {
+  background: var(--accent-dim);
+}
+
+.series-nav__dot--active {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow-strong);
+}
+
+.series-nav__dot--future {
+  background: var(--text-muted);
+  opacity: 0.3;
+}
+
+/* Reading progress bar */
+.reading-progress {
+  position: fixed;
+  top: 56px;
+  left: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-dim));
+  z-index: 101;
+  width: 0%;
+  transition: width 100ms linear;
+  box-shadow: 0 0 8px var(--accent-glow-strong);
+}
+
+/* ========================================
+   MAIN LAYOUT
+   ======================================== */
+.page-wrapper {
+  padding-top: 80px;
+  padding-bottom: 120px;
+}
+
+.container {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+@media (min-width: 768px) {
+  .container { padding: 0 32px; }
+}
+
+/* ========================================
+   HERO / OPENING
+   ======================================== */
+.hero {
+  padding: 48px 0 64px;
+  position: relative;
+}
+
+.hero__part-label {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hero__part-label::before {
+  content: '';
+  display: inline-block;
+  width: 24px;
+  height: 1px;
+  background: var(--accent);
+}
+
+.hero__title {
+  font-family: var(--font-display);
+  font-size: clamp(32px, 6vw, 52px);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  margin-bottom: 24px;
+}
+
+.hero__title span {
+  color: var(--red);
+  text-shadow: 0 0 40px var(--red-dim);
+}
+
+.hero__subtitle {
+  font-size: 18px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  max-width: 640px;
+}
+
+.hero__subtitle strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* ========================================
+   SECTION STYLING
+   ======================================== */
+.section {
+  margin-bottom: 80px;
+}
+
+.section__number {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.section__number::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--border-accent), transparent);
+}
+
+.section__heading {
+  font-family: var(--font-display);
+  font-size: clamp(24px, 4vw, 32px);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-primary);
+  margin-bottom: 24px;
+  letter-spacing: -0.01em;
+}
+
+.section p {
+  margin-bottom: 20px;
+  color: var(--text-secondary);
+}
+
+.section p strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* ========================================
+   15-STEP RECAP
+   ======================================== */
+.recap-strip {
+  display: flex;
+  gap: 2px;
+  align-items: flex-end;
+  margin: 32px 0 24px;
+  padding: 20px 24px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.recap-step {
+  flex: 1;
+  min-width: 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.recap-step__bar {
+  width: 100%;
+  max-width: 32px;
+  background: var(--border);
+  border-radius: 3px 3px 0 0;
+  transition: background 400ms ease, height 400ms ease;
+}
+
+.recap-step__num {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-muted);
+  line-height: 1;
+}
+
+.recap-strip.animated .recap-step__bar {
+  background: var(--red);
+  opacity: 0.6;
+}
+
+.recap-strip.animated .recap-step:nth-child(odd) .recap-step__bar {
+  opacity: 0.8;
+}
+
+/* ========================================
+   COST CENTER CARDS
+   ======================================== */
+.cost-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  margin: 40px 0;
+}
+
+.cost-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 28px 24px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 300ms ease, box-shadow 300ms ease;
+}
+
+.cost-card:hover {
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow-glow);
+}
+
+.cost-card__top-stripe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+}
+
+.cost-card[data-color="red"] .cost-card__top-stripe { background: var(--red); }
+.cost-card[data-color="orange"] .cost-card__top-stripe { background: var(--orange); }
+.cost-card[data-color="blue"] .cost-card__top-stripe { background: var(--blue); }
+.cost-card[data-color="purple"] .cost-card__top-stripe { background: var(--purple); }
+.cost-card[data-color="cyan"] .cost-card__top-stripe { background: var(--cyan); }
+.cost-card[data-color="yellow"] .cost-card__top-stripe { background: var(--yellow); }
+
+.cost-card__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.cost-card__icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.cost-card[data-color="red"] .cost-card__icon { background: var(--red-dim); color: var(--red); }
+.cost-card[data-color="orange"] .cost-card__icon { background: var(--orange-dim); color: var(--orange); }
+.cost-card[data-color="blue"] .cost-card__icon { background: var(--blue-dim); color: var(--blue); }
+.cost-card[data-color="purple"] .cost-card__icon { background: var(--purple-dim); color: var(--purple); }
+.cost-card[data-color="cyan"] .cost-card__icon { background: var(--cyan-dim); color: var(--cyan); }
+.cost-card[data-color="yellow"] .cost-card__icon { background: var(--yellow-dim); color: var(--yellow); }
+
+.cost-card__title-group {
+  flex: 1;
+}
+
+.cost-card__letter {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.cost-card[data-color="red"] .cost-card__letter { color: var(--red); }
+.cost-card[data-color="orange"] .cost-card__letter { color: var(--orange); }
+.cost-card[data-color="blue"] .cost-card__letter { color: var(--blue); }
+.cost-card[data-color="purple"] .cost-card__letter { color: var(--purple); }
+.cost-card[data-color="cyan"] .cost-card__letter { color: var(--cyan); }
+.cost-card[data-color="yellow"] .cost-card__letter { color: var(--yellow); }
+
+.cost-card__title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.cost-card__subtitle {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.cost-card__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  flex-shrink: 0;
+  white-space: nowrap;
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
+.cost-card[data-color="red"] .cost-card__badge { background: var(--red-dim); color: var(--red); }
+.cost-card[data-color="orange"] .cost-card__badge { background: var(--orange-dim); color: var(--orange); }
+.cost-card[data-color="blue"] .cost-card__badge { background: var(--blue-dim); color: var(--blue); }
+.cost-card[data-color="purple"] .cost-card__badge { background: var(--purple-dim); color: var(--purple); }
+.cost-card[data-color="cyan"] .cost-card__badge { background: var(--cyan-dim); color: var(--cyan); }
+.cost-card[data-color="yellow"] .cost-card__badge { background: var(--yellow-dim); color: var(--yellow); }
+
+.cost-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cost-card__body p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+
+.cost-card__body p strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.cost-card__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.stat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.stat-chip strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.cost-card__detail-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cost-card__detail-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.cost-card__detail-list li::before {
+  content: '';
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+  margin-top: 8px;
+}
+
+.cost-card__detail-list li strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.cost-card__detail-list li code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-code);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--text-code);
+  border: 1px solid var(--border);
+}
+
+/* ========================================
+   CALLOUT / WARNING BOX
+   ======================================== */
+.callout {
+  background: var(--bg-highlight);
+  border: 1px solid var(--border-accent);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md);
+  padding: 20px 24px;
+  margin: 28px 0;
+}
+
+.callout--warn {
+  background: var(--red-dim);
+  border-color: rgba(255, 107, 107, 0.2);
+  border-left-color: var(--red);
+}
+
+.callout__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+
+.callout--warn .callout__label {
+  color: var(--red);
+}
+
+.callout p {
+  color: var(--text-primary);
+  margin-bottom: 0;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.callout p strong {
+  color: var(--accent);
+}
+
+.callout--warn p strong {
+  color: var(--red);
+}
+
+/* ========================================
+   ANIMATED STACKED BAR CHART
+   ======================================== */
+.budget-chart {
+  margin: 40px 0;
+  padding: 32px 24px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.budget-chart__title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.budget-chart__subtitle {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 28px;
+}
+
+.budget-chart__bar-container {
+  position: relative;
+  height: 56px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+
+.budget-chart__bar-track {
+  display: flex;
+  height: 100%;
+  width: 0%;
+  transition: width 2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.budget-chart__bar-track.animated {
+  width: 115%;
+}
+
+.bar-fill {
+  height: 100%;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  min-width: 0;
+  transition: flex-basis 1.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.bar-fill__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.8);
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 6px;
+}
+
+.bar-fill--skbuff { background: var(--red); flex-basis: 15.5%; }
+.bar-fill--memory { background: var(--orange); flex-basis: 41.5%; }
+.bar-fill--netfilter { background: var(--blue); flex-basis: 7.8%; }
+.bar-fill--socket { background: var(--purple); flex-basis: 15.5%; }
+.bar-fill--checksum { background: var(--cyan); flex-basis: 5.2%; }
+.bar-fill--sched { background: var(--yellow); flex-basis: 14.5%; }
+
+/* Core capacity marker line */
+.budget-chart__core-marker {
+  position: absolute;
+  top: -6px;
+  bottom: -6px;
+  width: 2px;
+  background: var(--text-primary);
+  left: 86.96%; /* 1000ms / 1150ms = 86.96% of the 115% bar */
+  z-index: 10;
+  opacity: 0;
+  transition: opacity 0.5s ease 2s;
+}
+
+.budget-chart__bar-track.animated ~ .budget-chart__core-marker {
+  opacity: 1;
+}
+
+.budget-chart__core-label {
+  position: absolute;
+  top: -24px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  background: var(--bg-card);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+/* Scale */
+.budget-chart__scale {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 24px;
+  padding: 0 2px;
+}
+
+/* Legend */
+.budget-chart__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  margin-top: 16px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: default;
+}
+
+.legend-item__swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.legend-item__swatch--skbuff { background: var(--red); }
+.legend-item__swatch--memory { background: var(--orange); }
+.legend-item__swatch--netfilter { background: var(--blue); }
+.legend-item__swatch--socket { background: var(--purple); }
+.legend-item__swatch--checksum { background: var(--cyan); }
+.legend-item__swatch--sched { background: var(--yellow); }
+
+.legend-item__value {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+/* Total badge */
+.budget-total {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 24px;
+  padding: 16px 24px;
+  background: var(--red-dim);
+  border: 1px solid rgba(255, 107, 107, 0.2);
+  border-radius: var(--radius-md);
+}
+
+.budget-total__label {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.budget-total__value {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--red);
+}
+
+.budget-total__note {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ========================================
+   recvmmsg BEFORE/AFTER VISUAL
+   ======================================== */
+.batch-visual {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+  margin: 40px 0;
+}
+
+@media (min-width: 640px) {
+  .batch-visual {
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+}
+
+.batch-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  overflow: hidden;
+  position: relative;
+}
+
+.batch-panel--before {
+  border-top: 3px solid var(--red);
+}
+
+.batch-panel--after {
+  border-top: 3px solid var(--accent);
+}
+
+.batch-panel__title {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.batch-panel--before .batch-panel__title { color: var(--red); }
+.batch-panel--after .batch-panel__title { color: var(--accent); }
+
+.batch-panel__fn {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 20px;
+}
+
+.batch-panel--before .batch-panel__fn { color: var(--red); }
+.batch-panel--after .batch-panel__fn { color: var(--accent); }
+
+.syscall-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 180px;
+}
+
+.syscall-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  opacity: 0;
+  animation: syscallIn 200ms ease forwards;
+}
+
+.syscall-line--single {
+  background: var(--red-dim);
+  border: 1px solid rgba(255, 107, 107, 0.1);
+}
+
+.syscall-line--batch {
+  background: var(--accent-glow);
+  border: 1px solid rgba(0, 245, 160, 0.1);
+}
+
+.syscall-line__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.syscall-line--single .syscall-line__label { color: var(--red); }
+.syscall-line--batch .syscall-line__label { color: var(--accent); }
+
+.syscall-line__packets {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+
+.syscall-line__packet {
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+}
+
+.syscall-line--single .syscall-line__packet { background: var(--red); opacity: 0.6; }
+.syscall-line--batch .syscall-line__packet { background: var(--accent); opacity: 0.6; }
+
+.syscall-line__ellipsis {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 4px 0;
+  letter-spacing: 4px;
+}
+
+@keyframes syscallIn {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.batch-panel__stat {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+.batch-panel__stat-value {
+  font-family: var(--font-mono);
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.batch-panel--before .batch-panel__stat-value { color: var(--red); }
+.batch-panel--after .batch-panel__stat-value { color: var(--accent); }
+
+.batch-panel__stat-label {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.batch-reduction {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 16px 0 0;
+  padding: 14px 20px;
+  background: var(--accent-glow);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+@media (min-width: 640px) {
+  .batch-reduction {
+    grid-column: 1 / -1;
+  }
+}
+
+.batch-reduction__arrow {
+  font-size: 18px;
+  line-height: 1;
+}
+
+/* ========================================
+   COMPARISON TABLE (what recvmmsg fixes vs doesn't)
+   ======================================== */
+.compare-table-wrap {
+  margin: 32px 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+}
+
+.compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  min-width: 520px;
+}
+
+.compare-table thead {
+  background: var(--bg-secondary);
+}
+
+.compare-table th {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+  padding: 14px 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.compare-table th:nth-child(2),
+.compare-table th:nth-child(3) {
+  text-align: center;
+  width: 100px;
+}
+
+.compare-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  vertical-align: middle;
+}
+
+.compare-table td:nth-child(2),
+.compare-table td:nth-child(3) {
+  text-align: center;
+}
+
+.compare-table tbody tr {
+  background: var(--bg-card);
+  transition: background 150ms ease;
+}
+
+.compare-table tbody tr:hover {
+  background: var(--bg-card-hover);
+}
+
+.compare-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.compare-table td code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-code);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--text-code);
+  border: 1px solid var(--border);
+}
+
+.icon-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(0, 245, 160, 0.12);
+}
+
+.icon-check svg { color: var(--accent); }
+
+.icon-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--red-dim);
+}
+
+.icon-x svg { color: var(--red); }
+
+/* ========================================
+   PREV/NEXT NAVIGATION FOOTER
+   ======================================== */
+.part-nav {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 80px;
+}
+
+@media (max-width: 480px) {
+  .part-nav {
+    grid-template-columns: 1fr;
+  }
+}
+
+.part-nav__link {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 20px 24px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  text-decoration: none;
+  transition: border-color 200ms ease, box-shadow 200ms ease, transform 150ms ease;
+  cursor: pointer;
+}
+
+.part-nav__link:hover {
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow-glow);
+  transform: translateY(-2px);
+}
+
+.part-nav__link:active {
+  transform: translateY(0);
+}
+
+.part-nav__link--prev {
+  align-items: flex-start;
+}
+
+.part-nav__link--next {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.part-nav__dir {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.part-nav__dir svg {
+  color: var(--accent);
+  transition: transform 200ms ease;
+}
+
+.part-nav__link:hover .part-nav__dir svg {
+  transform: translateX(-3px);
+}
+
+.part-nav__link--next:hover .part-nav__dir svg {
+  transform: translateX(3px);
+}
+
+.part-nav__name {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* ========================================
+   BRIDGE / NEXT-PART CTA
+   ======================================== */
+.bridge {
+  margin-top: 48px;
+  padding: 32px;
+  background: var(--bg-highlight);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-lg);
+  position: relative;
+  overflow: hidden;
+}
+
+.bridge::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+}
+
+.bridge__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+
+.bridge p {
+  font-size: 16px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.bridge p strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* ========================================
+   FOOTER
+   ======================================== */
+.page-footer {
+  margin-top: 60px;
+  padding-top: 32px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+.page-footer p {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.8;
+}
+
+.page-footer a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.page-footer a:hover {
+  text-decoration: underline;
+}
+
+/* ========================================
+   SCROLL ANIMATIONS
+   ======================================== */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 600ms ease, transform 600ms ease;
+}
+
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Staggered reveal for cost cards */
+.reveal-stagger:nth-child(1) { transition-delay: 0ms; }
+.reveal-stagger:nth-child(2) { transition-delay: 80ms; }
+.reveal-stagger:nth-child(3) { transition-delay: 160ms; }
+.reveal-stagger:nth-child(4) { transition-delay: 240ms; }
+.reveal-stagger:nth-child(5) { transition-delay: 320ms; }
+.reveal-stagger:nth-child(6) { transition-delay: 400ms; }
+
+/* ========================================
+   FOCUS STYLES
+   ======================================== */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ========================================
+   SELECTION
+   ======================================== */
+::selection {
+  background: var(--accent-glow-strong);
+  color: var(--text-primary);
+}
+
+/* ========================================
+   DECORATIVE BACKGROUND
+   ======================================== */
+.bg-grid {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: -1;
+  background-image:
+    radial-gradient(circle at 50% 0%, rgba(255, 107, 107, 0.03) 0%, transparent 50%),
+    linear-gradient(rgba(30, 42, 58, 0.15) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30, 42, 58, 0.15) 1px, transparent 1px);
+  background-size: 100% 100%, 60px 60px, 60px 60px;
+  mask-image: radial-gradient(ellipse at center top, black 0%, transparent 70%);
+  -webkit-mask-image: radial-gradient(ellipse at center top, black 0%, transparent 70%);
+}
+
+/* ========================================
+   CODE INLINE
+   ======================================== */
+code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--bg-code);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--text-code);
+  border: 1px solid var(--border);
+}
+
+/* ========================================
+   RESPONSIVE: SMALL
+   ======================================== */
+@media (max-width: 480px) {
+  .cost-card__header {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .cost-card__badge {
+    align-self: flex-start;
+  }
+  .budget-chart__bar-container {
+    height: 44px;
+  }
+  .bar-fill__label {
+    font-size: 8px;
+  }
+  .budget-total {
+    flex-direction: column;
+    text-align: center;
+    gap: 6px;
+  }
+}
+</style>
+</head>
+<body>
+
+<!-- Background grid -->
+<div class="bg-grid" aria-hidden="true"></div>
+
+<!-- Series navigation -->
+<nav class="series-nav" role="navigation" aria-label="Series navigation">
+  <div class="series-nav__left">
+    <span class="series-nav__label">Part 3 of 7</span>
+    <span class="series-nav__title">Linux Networking for Agave Validators</span>
+  </div>
+  <div class="series-nav__progress" aria-label="Series progress">
+    <div class="series-nav__dot series-nav__dot--completed" aria-label="Part 1, completed"></div>
+    <div class="series-nav__dot series-nav__dot--completed" aria-label="Part 2, completed"></div>
+    <div class="series-nav__dot series-nav__dot--active" aria-label="Part 3, current"></div>
+    <div class="series-nav__dot series-nav__dot--future" aria-label="Part 4"></div>
+    <div class="series-nav__dot series-nav__dot--future" aria-label="Part 5"></div>
+    <div class="series-nav__dot series-nav__dot--future" aria-label="Part 6"></div>
+    <div class="series-nav__dot series-nav__dot--future" aria-label="Part 7"></div>
+  </div>
+</nav>
+
+<!-- Reading progress bar -->
+<div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+<main class="page-wrapper">
+  <div class="container">
+
+    <!-- ============================
+         HERO
+         ============================ -->
+    <header class="hero">
+      <div class="hero__part-label">Part 3</div>
+      <h1 class="hero__title">Why The Classic Path <span>Breaks</span></h1>
+      <p class="hero__subtitle">
+        You know the 15-step packet journey from NIC to userspace. Now consider what happens
+        when <strong>every one of those steps runs a million times per second.</strong>
+        The math is not kind.
+      </p>
+    </header>
+
+    <!-- ============================
+         SECTION 1: THE SETUP
+         ============================ -->
+    <section class="section reveal" id="setup">
+      <div class="section__number">01</div>
+      <h2 class="section__heading">One Million Packets Per Second</h2>
+      <p>
+        In Part 2, we traced a single Solana packet through 15 kernel steps: NIC DMA,
+        interrupt, NAPI poll, <code>sk_buff</code> allocation, protocol demux, netfilter,
+        checksum, socket lookup, queue insertion, wakeup, <code>recvmsg</code>, userspace copy.
+        Each step is cheap in isolation. A few hundred nanoseconds here, a microsecond there.
+      </p>
+      <p>
+        At low traffic, nobody notices. But Solana validators routinely handle
+        <strong>800K to 1.5M UDP packets per second</strong> during normal operation: turbine
+        shreds, repair requests, votes, gossip, QUIC-wrapped transactions. Scale any per-packet
+        cost by a million and the seconds fill up fast.
+      </p>
+
+      <!-- Mini 15-step recap strip -->
+      <div class="recap-strip" id="recapStrip" aria-label="15 kernel steps, each one now a bottleneck">
+        <div class="recap-step"><div class="recap-step__bar" style="height:18px"></div><span class="recap-step__num">1</span></div>
+        <div class="recap-step"><div class="recap-step__bar" style="height:22px"></div><span class="recap-step__num">2</span></div>
+        <div class="recap-step"><div class="recap-step__bar" style="height:14px"></div><span class="recap-step__num">3</span></div>
+        <div class="recap-step"><div class="recap-step__bar" style="height:28px"></div><span class="recap-step__num">4</span></div>
+        <div class="recap-step"><div class="recap-step__bar" style="height:20px"></div><span class="recap-step__num">5</span></div>
+        <div class="recap-step"><div class="recap-step__bar" style="height:36px"></div><span class="recap-step__num">6</span></div>
+        <div class="recap-step"><div class="recap-step__bar" style="height:16px"></div><span class="recap-step__num">7</span></div>
+        <div class="recap-step"><div class="recap-step__bar" style="height:24px"></div><span class="recap-step__num">8</span></div>
+        <div class="recap-step"><div class="recap-step__bar" style="height:32px"></div><span class="recap-step__num">9</span></div>
+        <div class="recap-step"><div class="recap-step__bar" style="height:20px"></div><span class="recap-step__num">10</span></div>
+        <div class="recap-step"><div class="recap-step__bar" style="height:40px"></div><span class="recap-step__num">11</span></div>
+        <div class="recap-step"><div class="recap-step__bar" style="height:26px"></div><span class="recap-step__num">12</span></div>
+        <div class="recap-step"><div class="recap-step__bar" style="height:18px"></div><span class="recap-step__num">13</span></div>
+        <div class="recap-step"><div class="recap-step__bar" style="height:30px"></div><span class="recap-step__num">14</span></div>
+        <div class="recap-step"><div class="recap-step__bar" style="height:22px"></div><span class="recap-step__num">15</span></div>
+      </div>
+
+      <p>
+        Every bar above is a step that costs CPU time per packet. We can group these 15 steps
+        into <strong>six cost centers</strong> where the time actually goes. Let's put real
+        numbers on each one.
+      </p>
+    </section>
+
+    <!-- ============================
+         SECTION 2: THE SIX COST CENTERS
+         ============================ -->
+    <section class="section reveal" id="cost-centers">
+      <div class="section__number">02</div>
+      <h2 class="section__heading">The Six Cost Centers</h2>
+      <p>
+        These estimates use measured values from kernel profiling literature and typical
+        validator hardware (AMD EPYC / Intel Xeon, DDR5, ConnectX-6 / Intel E810 NICs).
+        Ranges reflect variance across hardware and kernel configuration.
+      </p>
+
+      <div class="cost-grid">
+
+        <!-- CARD A: sk_buff Lifecycle -->
+        <div class="cost-card reveal reveal-stagger" data-color="red">
+          <div class="cost-card__top-stripe"></div>
+          <div class="cost-card__header">
+            <div class="cost-card__icon">
+              <!-- Alloc/free icon: box with recycling arrows -->
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                <path d="M12 8v8"/>
+                <path d="M8 12h8"/>
+              </svg>
+            </div>
+            <div class="cost-card__title-group">
+              <div class="cost-card__letter">Cost Center A</div>
+              <div class="cost-card__title">sk_buff Lifecycle</div>
+              <div class="cost-card__subtitle">One alloc + one free per packet</div>
+            </div>
+            <div class="cost-card__badge">100-200ms/s</div>
+          </div>
+          <div class="cost-card__body">
+            <p>
+              Every packet that enters the kernel gets an <code>sk_buff</code> struct: the
+              kernel's universal packet metadata container. That's roughly <strong>240 bytes from
+              the SLAB allocator</strong> per packet. At 1M pps, that's 2 million allocator
+              round-trips per second.
+            </p>
+            <div class="cost-card__stats">
+              <div class="stat-chip"><strong>~240B</strong> per sk_buff</div>
+              <div class="stat-chip"><strong>2M</strong> alloc ops/sec</div>
+              <div class="stat-chip"><strong>50-100ns</strong> per alloc</div>
+            </div>
+            <ul class="cost-card__detail-list">
+              <li>Each allocation hits the SLAB/SLUB per-CPU cache or falls back to the per-node partial list. Cache misses here are expensive.</li>
+              <li><code>free_skb()</code> is not a simple <code>kfree()</code>. It runs destructor callbacks, releases fragment pages, and updates socket memory accounting.</li>
+              <li>Under pressure the allocator contends on per-node locks, adding 100+ ns to every operation.</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- CARD B: Memory Traffic -->
+        <div class="cost-card reveal reveal-stagger" data-color="orange">
+          <div class="cost-card__top-stripe"></div>
+          <div class="cost-card__header">
+            <div class="cost-card__icon">
+              <!-- Memory / cache lines icon -->
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 6h16"/>
+                <path d="M4 10h16"/>
+                <path d="M4 14h16"/>
+                <path d="M4 18h16"/>
+                <rect x="2" y="4" width="20" height="16" rx="2"/>
+              </svg>
+            </div>
+            <div class="cost-card__title-group">
+              <div class="cost-card__letter">Cost Center B</div>
+              <div class="cost-card__title">Memory Traffic</div>
+              <div class="cost-card__subtitle">Cache-line misses and payload copies</div>
+            </div>
+            <div class="cost-card__badge">300-500ms/s</div>
+          </div>
+          <div class="cost-card__body">
+            <p>
+              This is the <strong>single largest cost</strong>. Each packet touches at least four
+              memory locations: the DMA ring buffer, the <code>sk_buff</code> struct (spanning
+              ~4 cache lines), the socket queue pointers, and the final userspace buffer. Each
+              L3/DRAM cache-line miss costs <strong>60-100ns</strong>.
+            </p>
+            <div class="cost-card__stats">
+              <div class="stat-chip"><strong>8-12</strong> cache lines / metadata</div>
+              <div class="stat-chip"><strong>1232B</strong> = 20 cache lines / payload</div>
+              <div class="stat-chip"><strong>~20M</strong> cache writes/sec</div>
+            </div>
+            <ul class="cost-card__detail-list">
+              <li>The <code>copy_to_user()</code> call writes 1,232 bytes (Solana's MTU) into userspace memory. That's 20 cache lines written per packet, 20M writes per second at 1M pps.</li>
+              <li>DMA buffer to sk_buff data pointer is a reference, not a copy. But the sk_buff metadata itself is freshly allocated and almost always cold in cache.</li>
+              <li>NUMA-aware allocation helps, but cross-socket memory access (when IRQ affinity doesn't match the receiving thread's CPU) pushes latency to 150ns+ per line.</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- CARD C: Netfilter Hooks -->
+        <div class="cost-card reveal reveal-stagger" data-color="blue">
+          <div class="cost-card__top-stripe"></div>
+          <div class="cost-card__header">
+            <div class="cost-card__icon">
+              <!-- Firewall / shield icon -->
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              </svg>
+            </div>
+            <div class="cost-card__title-group">
+              <div class="cost-card__letter">Cost Center C</div>
+              <div class="cost-card__title">Netfilter Hooks</div>
+              <div class="cost-card__subtitle">Firewall traversal per packet</div>
+            </div>
+            <div class="cost-card__badge">50-100ms/s</div>
+          </div>
+          <div class="cost-card__body">
+            <p>
+              Even with an empty <code>iptables</code> ruleset, the kernel still traverses the
+              netfilter hook registration chain for every packet. With rules, it's O(n) per rule
+              per packet. Connection tracking (conntrack) allocates a per-flow hash entry and
+              maintains state.
+            </p>
+            <div class="cost-card__stats">
+              <div class="stat-chip"><strong>O(n)</strong> per rule</div>
+              <div class="stat-chip"><strong>conntrack</strong> hash alloc</div>
+            </div>
+            <ul class="cost-card__detail-list">
+              <li>Production validators often have firewall rules for rate-limiting, geo-blocking, and port filtering. Each rule is a branch per packet.</li>
+              <li>conntrack maintains a hash table of active flows. For UDP (stateless transport), this is pure overhead: the kernel tracks state that the protocol doesn't need.</li>
+              <li>Disabling conntrack for validator traffic is a common optimization, but doesn't eliminate the hook traversal cost.</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- CARD D: Socket Mechanics -->
+        <div class="cost-card reveal reveal-stagger" data-color="purple">
+          <div class="cost-card__top-stripe"></div>
+          <div class="cost-card__header">
+            <div class="cost-card__icon">
+              <!-- Socket / queue icon -->
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+              </svg>
+            </div>
+            <div class="cost-card__title-group">
+              <div class="cost-card__letter">Cost Center D</div>
+              <div class="cost-card__title">Socket Mechanics</div>
+              <div class="cost-card__subtitle">Hash lookup, queue locks, buffer pressure, wakeups</div>
+            </div>
+            <div class="cost-card__badge">100-200ms/s</div>
+          </div>
+          <div class="cost-card__body">
+            <p>
+              Every packet needs a socket lookup (~100ns hash table probe), then insertion into
+              <code>sk_receive_queue</code> under a spinlock. Under contention with multiple
+              cores, that lock costs <strong>200-1000ns per acquisition</strong>.
+            </p>
+            <div class="cost-card__stats">
+              <div class="stat-chip"><strong>~100ns</strong> hash lookup</div>
+              <div class="stat-chip"><strong>200-1000ns</strong> spinlock</div>
+            </div>
+            <ul class="cost-card__detail-list">
+              <li><strong>Silent drops:</strong> if <code>sk_rmem_alloc</code> exceeds <code>sk_rcvbuf</code>, the packet is dropped. No error to the sender, no backpressure signal. You only see it in the <code>UDPInErrors</code> counter.</li>
+              <li><code>sock_def_readable()</code> triggers <code>wake_up_interruptible()</code>, which involves the scheduler. If the receiving thread is sleeping on <code>recvmsg</code>, waking it pollutes the cache of whatever core it lands on.</li>
+              <li>Multiple softIRQ contexts competing to queue packets on the same socket creates lock convoy effects.</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- CARD E: Checksums -->
+        <div class="cost-card reveal reveal-stagger" data-color="cyan">
+          <div class="cost-card__top-stripe"></div>
+          <div class="cost-card__header">
+            <div class="cost-card__icon">
+              <!-- Checksum / verify icon -->
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 11 12 14 22 4"/>
+                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+              </svg>
+            </div>
+            <div class="cost-card__title-group">
+              <div class="cost-card__letter">Cost Center E</div>
+              <div class="cost-card__title">Checksums</div>
+              <div class="cost-card__subtitle">Software checksum unless hardware offload</div>
+            </div>
+            <div class="cost-card__badge">~100ms or ~0</div>
+          </div>
+          <div class="cost-card__body">
+            <p>
+              The UDP checksum covers the pseudo-header + UDP header + payload. Without NIC
+              offload, the CPU reads every byte of each 1,232-byte packet.
+              At 1M pps: <strong>1.2 GB/s of reads just for checksumming.</strong>
+            </p>
+            <div class="cost-card__stats">
+              <div class="stat-chip"><strong>1232B</strong> read per packet</div>
+              <div class="stat-chip"><strong>1.2 GB/s</strong> without offload</div>
+            </div>
+            <ul class="cost-card__detail-list">
+              <li>Most validator-grade NICs (Mellanox ConnectX-6, Intel E810) support hardware checksum offload. With offload enabled, this cost drops to near zero.</li>
+              <li>Without offload (misconfigured NIC, or software-based virtio in a VM), this becomes a significant CPU consumer. Always verify offload is active with <code>ethtool -k</code>.</li>
+              <li>The kernel can also use <code>CHECKSUM_UNNECESSARY</code> to skip re-verification when the NIC has already validated.</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- CARD F: Scheduling Overhead -->
+        <div class="cost-card reveal reveal-stagger" data-color="yellow">
+          <div class="cost-card__top-stripe"></div>
+          <div class="cost-card__header">
+            <div class="cost-card__icon">
+              <!-- CPU / scheduling icon -->
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="4" y="4" width="16" height="16" rx="2"/>
+                <rect x="9" y="9" width="6" height="6"/>
+                <path d="M15 2v2"/><path d="M15 20v2"/>
+                <path d="M2 15h2"/><path d="M2 9h2"/>
+                <path d="M20 15h2"/><path d="M20 9h2"/>
+                <path d="M9 2v2"/><path d="M9 20v2"/>
+              </svg>
+            </div>
+            <div class="cost-card__title-group">
+              <div class="cost-card__letter">Cost Center F</div>
+              <div class="cost-card__title">Scheduling Overhead</div>
+              <div class="cost-card__subtitle">IRQs, softIRQs, syscalls, context switches</div>
+            </div>
+            <div class="cost-card__badge">100-200ms/s</div>
+          </div>
+          <div class="cost-card__body">
+            <p>
+              The orchestration tax. Every packet delivery involves multiple privilege transitions
+              and scheduling decisions that consume CPU independently of the packet itself.
+            </p>
+            <div class="cost-card__stats">
+              <div class="stat-chip"><strong>1-2us</strong> IRQ entry/exit</div>
+              <div class="stat-chip"><strong>100-200ns</strong> Spectre syscall</div>
+            </div>
+            <ul class="cost-card__detail-list">
+              <li><strong>IRQ entry/exit:</strong> save/restore registers, acknowledge the interrupt controller, potentially cross-CPU IPI for interrupt steering. 1-2 microseconds per interrupt.</li>
+              <li><strong>softIRQ scheduling:</strong> <code>ksoftirqd</code> context switches when softIRQ budget is exhausted, polluting TLB and instruction cache.</li>
+              <li><strong>Spectre-mitigated syscalls:</strong> post-Spectre, every <code>recvmsg</code> syscall includes IBPB/STIBP barriers. That's 100-200ns of pure mitigation overhead per call.</li>
+              <li><strong>Thread wakeup:</strong> when the receiving thread sleeps on <code>recvmsg</code>, waking it triggers scheduler runqueue insertion and potential cross-core migration. The newly-woken thread starts with a cold instruction cache.</li>
+            </ul>
+          </div>
+        </div>
+
+      </div><!-- /cost-grid -->
+    </section>
+
+    <!-- ============================
+         SECTION 3: THE TOTAL BILL
+         ============================ -->
+    <section class="section reveal" id="total-bill">
+      <div class="section__number">03</div>
+      <h2 class="section__heading">The Total Bill</h2>
+      <p>
+        Stack these costs and the picture is grim. Here's the CPU time budget at
+        1M packets per second, broken down by cost center:
+      </p>
+
+      <!-- Animated stacked horizontal bar chart -->
+      <div class="budget-chart" id="budgetChart">
+        <div class="budget-chart__title">CPU Time per Second at 1M pps</div>
+        <div class="budget-chart__subtitle">Stacked horizontal: 1000ms = one full CPU core</div>
+
+        <div class="budget-chart__bar-container">
+          <div class="budget-chart__bar-track" id="barTrack">
+            <div class="bar-fill bar-fill--skbuff" title="sk_buff: 150ms">
+              <span class="bar-fill__label">sk_buff</span>
+            </div>
+            <div class="bar-fill bar-fill--memory" title="Memory: 400ms">
+              <span class="bar-fill__label">Memory</span>
+            </div>
+            <div class="bar-fill bar-fill--netfilter" title="Netfilter: 75ms">
+              <span class="bar-fill__label">Netfilter</span>
+            </div>
+            <div class="bar-fill bar-fill--socket" title="Socket: 150ms">
+              <span class="bar-fill__label">Socket</span>
+            </div>
+            <div class="bar-fill bar-fill--checksum" title="Checksum: 50ms">
+              <span class="bar-fill__label">Chksum</span>
+            </div>
+            <div class="bar-fill bar-fill--sched" title="Scheduling: 150ms">
+              <span class="bar-fill__label">Sched</span>
+            </div>
+          </div>
+          <!-- 100% core marker -->
+          <div class="budget-chart__core-marker" id="coreMarker">
+            <div class="budget-chart__core-label">1 core = 1000ms</div>
+          </div>
+        </div>
+
+        <div class="budget-chart__scale">
+          <span>0ms</span>
+          <span>250ms</span>
+          <span>500ms</span>
+          <span>750ms</span>
+          <span>1000ms</span>
+          <span>1150ms</span>
+        </div>
+
+        <div class="budget-chart__legend">
+          <div class="legend-item">
+            <div class="legend-item__swatch legend-item__swatch--skbuff"></div>
+            sk_buff <span class="legend-item__value">~150ms</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-item__swatch legend-item__swatch--memory"></div>
+            Memory <span class="legend-item__value">~400ms</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-item__swatch legend-item__swatch--netfilter"></div>
+            Netfilter <span class="legend-item__value">~75ms</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-item__swatch legend-item__swatch--socket"></div>
+            Socket <span class="legend-item__value">~150ms</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-item__swatch legend-item__swatch--checksum"></div>
+            Checksum <span class="legend-item__value">~50ms</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-item__swatch legend-item__swatch--sched"></div>
+            Scheduling <span class="legend-item__value">~150ms</span>
+          </div>
+        </div>
+
+        <div class="budget-total">
+          <span class="budget-total__label">Total</span>
+          <span class="budget-total__value">~975ms</span>
+          <span class="budget-total__note">out of 1000ms available on a single core</span>
+        </div>
+      </div>
+
+      <div class="callout callout--warn">
+        <div class="callout__label">The Problem</div>
+        <p>
+          That's <strong>75-120% of a single CPU core</strong> consumed by packet reception alone.
+          Before Agave does anything useful: QUIC decryption, signature verification, deduplication,
+          banking stage, proof-of-history. The kernel's packet path is eating the CPU budget that
+          the validator needs for actual consensus work.
+        </p>
+      </div>
+    </section>
+
+    <!-- ============================
+         SECTION 4: THE BAND-AID (recvmmsg)
+         ============================ -->
+    <section class="section reveal" id="recvmmsg">
+      <div class="section__number">04</div>
+      <h2 class="section__heading">The Band-Aid: Batched UDP</h2>
+      <p>
+        The kernel provides one optimization within its existing rules:
+        <code>recvmmsg()</code> and <code>sendmmsg()</code>. Instead of one packet per
+        syscall, you receive up to N packets in a single kernel round-trip.
+      </p>
+      <p>
+        Agave uses batch sizes of <strong>128 to 512 packets</strong>, mapping directly to
+        its internal <code>PacketBatch</code> structure. The syscall reduction is dramatic:
+      </p>
+
+      <!-- Before / After visual -->
+      <div class="batch-visual" id="batchVisual">
+
+        <!-- BEFORE: recvmsg -->
+        <div class="batch-panel batch-panel--before">
+          <div class="batch-panel__title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+            Before
+          </div>
+          <div class="batch-panel__fn">recvmsg()</div>
+          <div class="syscall-lines" id="beforeLines">
+            <!-- JS-generated: 8 individual syscall lines + ellipsis -->
+          </div>
+          <div class="batch-panel__stat">
+            <div class="batch-panel__stat-value">1,000,000</div>
+            <div class="batch-panel__stat-label">syscalls per second</div>
+          </div>
+        </div>
+
+        <!-- AFTER: recvmmsg -->
+        <div class="batch-panel batch-panel--after">
+          <div class="batch-panel__title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            After
+          </div>
+          <div class="batch-panel__fn">recvmmsg() batch=128</div>
+          <div class="syscall-lines" id="afterLines">
+            <!-- JS-generated: 3 batch syscall lines + ellipsis -->
+          </div>
+          <div class="batch-panel__stat">
+            <div class="batch-panel__stat-value">~7,800</div>
+            <div class="batch-panel__stat-label">syscalls per second</div>
+          </div>
+        </div>
+
+        <div class="batch-reduction">
+          <span>1M syscalls</span>
+          <span class="batch-reduction__arrow">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+            </svg>
+          </span>
+          <span>~8K syscalls = 125x reduction</span>
+        </div>
+      </div>
+
+      <p>
+        The improvement is real. But look carefully at what <code>recvmmsg</code> actually
+        changes. It amortizes syscall overhead across a batch. Everything else still runs
+        per packet:
+      </p>
+
+      <!-- Comparison table: what's fixed vs not -->
+      <div class="compare-table-wrap reveal">
+        <table class="compare-table" role="table">
+          <thead>
+            <tr>
+              <th scope="col">Cost Center</th>
+              <th scope="col">Per-Packet?</th>
+              <th scope="col">Fixed by recvmmsg?</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>sk_buff</code> alloc/free</td>
+              <td>
+                <span class="icon-check" aria-label="Yes, per-packet">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                </span>
+              </td>
+              <td>
+                <span class="icon-x" aria-label="Not fixed">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td>Cache / memory traffic</td>
+              <td>
+                <span class="icon-check" aria-label="Yes, per-packet">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                </span>
+              </td>
+              <td>
+                <span class="icon-x" aria-label="Not fixed">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td>Netfilter traversal</td>
+              <td>
+                <span class="icon-check" aria-label="Yes, per-packet">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                </span>
+              </td>
+              <td>
+                <span class="icon-x" aria-label="Not fixed">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td>Socket queue lock</td>
+              <td>
+                <span class="icon-check" aria-label="Yes, per-packet">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                </span>
+              </td>
+              <td>
+                <span class="icon-x" aria-label="Not fixed">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td>Checksum verification</td>
+              <td>
+                <span class="icon-check" aria-label="Yes, per-packet">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                </span>
+              </td>
+              <td>
+                <span class="icon-x" aria-label="Not fixed">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td>Userspace copy</td>
+              <td>
+                <span class="icon-check" aria-label="Yes, per-packet">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                </span>
+              </td>
+              <td>
+                <span class="icon-x" aria-label="Not fixed">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td><strong>Syscall overhead</strong></td>
+              <td>
+                <span class="icon-check" aria-label="Yes, per-packet">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                </span>
+              </td>
+              <td>
+                <span class="icon-check" aria-label="Fixed">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout">
+        <div class="callout__label">Key Insight</div>
+        <p>
+          <code>recvmmsg</code> is "optimized classic UDP." It's the local maximum within the
+          kernel's existing rules. Only one line in that table turns green. The other six costs,
+          totaling 800+ ms per second, remain untouched. To make a real dent, you need to change
+          <strong>which rules apply</strong>, not optimize within them.
+        </p>
+      </div>
+    </section>
+
+    <!-- ============================
+         SECTION 5: BRIDGE TO NEXT PART
+         ============================ -->
+    <section class="section reveal" id="bridge">
+      <div class="section__number">05</div>
+      <h2 class="section__heading">The Ceiling</h2>
+      <p>
+        We've exhausted what the traditional kernel packet path can offer. Even with
+        <code>recvmmsg</code> batching, hardware checksum offload, conntrack disabled, and
+        IRQ affinity tuned, the fundamental architecture remains: allocate per packet, copy
+        per packet, lock per packet, traverse hooks per packet.
+      </p>
+
+      <div class="bridge reveal">
+        <div class="bridge__label">Up Next: Part 4</div>
+        <p>
+          The next part introduces <strong>eBPF</strong>: a way to run custom programs
+          inside the kernel itself. Instead of packets climbing the full 15-step staircase,
+          eBPF lets you intercept them early, filter what matters, steer packets to the right
+          core, and bypass entire subsystems. It's how Agave validators escape the ceiling
+          we just measured.
+        </p>
+      </div>
+    </section>
+
+    <!-- ============================
+         PREV / NEXT NAVIGATION
+         ============================ -->
+    <nav class="part-nav reveal" aria-label="Part navigation">
+      <a href="part2-packet-journey.html" class="part-nav__link part-nav__link--prev">
+        <span class="part-nav__dir">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
+          </svg>
+          Previous
+        </span>
+        <span class="part-nav__name">Part 2: The Packet's Journey</span>
+      </a>
+      <a href="part4-ebpf.html" class="part-nav__link part-nav__link--next">
+        <span class="part-nav__dir">
+          Next
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+          </svg>
+        </span>
+        <span class="part-nav__name">Part 4: eBPF</span>
+      </a>
+    </nav>
+
+    <!-- ============================
+         FOOTER
+         ============================ -->
+    <footer class="page-footer">
+      <p>
+        Linux Networking for Agave Validators<br>
+        <a href="https://turbin3.com" target="_blank" rel="noopener">Turbin3</a> Advanced SVM Cohort, Q2 2026
+      </p>
+    </footer>
+
+  </div>
+</main>
+
+<script>
+(function() {
+  'use strict';
+
+  // ============================
+  // Reduced Motion Check
+  // ============================
+  var prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ============================
+  // Reading Progress Bar
+  // ============================
+  var progressBar = document.getElementById('readingProgress');
+  var ticking = false;
+
+  function updateProgress() {
+    var scrollTop = window.scrollY;
+    var docHeight = document.documentElement.scrollHeight - window.innerHeight;
+    var progress = docHeight > 0 ? (scrollTop / docHeight) * 100 : 0;
+    progressBar.style.width = progress + '%';
+    ticking = false;
+  }
+
+  window.addEventListener('scroll', function() {
+    if (!ticking) {
+      requestAnimationFrame(updateProgress);
+      ticking = true;
+    }
+  }, { passive: true });
+
+  // ============================
+  // Scroll Reveal (Intersection Observer)
+  // ============================
+  if (!prefersReducedMotion) {
+    var revealElements = document.querySelectorAll('.reveal');
+    var revealObserver = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          revealObserver.unobserve(entry.target);
+        }
+      });
+    }, {
+      threshold: 0.1,
+      rootMargin: '0px 0px -60px 0px'
+    });
+
+    revealElements.forEach(function(el) {
+      revealObserver.observe(el);
+    });
+  } else {
+    document.querySelectorAll('.reveal').forEach(function(el) {
+      el.classList.add('visible');
+    });
+  }
+
+  // ============================
+  // Animate 15-step recap strip
+  // ============================
+  var recapStrip = document.getElementById('recapStrip');
+  if (recapStrip) {
+    var recapObserver = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('animated');
+          recapObserver.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.3 });
+    recapObserver.observe(recapStrip);
+  }
+
+  // ============================
+  // Animate Budget Bar Chart
+  // ============================
+  var barTrack = document.getElementById('barTrack');
+  if (barTrack) {
+    var barObserver = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('animated');
+          barObserver.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.3 });
+    barObserver.observe(barTrack);
+  }
+
+  // ============================
+  // Generate recvmsg Before/After Visuals
+  // ============================
+  var beforeLines = document.getElementById('beforeLines');
+  var afterLines = document.getElementById('afterLines');
+
+  if (beforeLines) {
+    // Before: 8 individual syscall lines + ellipsis
+    var fragment = document.createDocumentFragment();
+    for (var i = 0; i < 8; i++) {
+      var line = document.createElement('div');
+      line.className = 'syscall-line syscall-line--single';
+      if (!prefersReducedMotion) {
+        line.style.animationDelay = (i * 60) + 'ms';
+      } else {
+        line.style.opacity = '1';
+      }
+
+      var label = document.createElement('span');
+      label.className = 'syscall-line__label';
+      label.textContent = 'recv()';
+      line.appendChild(label);
+
+      var packets = document.createElement('span');
+      packets.className = 'syscall-line__packets';
+      var dot = document.createElement('span');
+      dot.className = 'syscall-line__packet';
+      packets.appendChild(dot);
+      line.appendChild(packets);
+
+      fragment.appendChild(line);
+    }
+
+    var ellipsis = document.createElement('div');
+    ellipsis.className = 'syscall-line__ellipsis';
+    ellipsis.textContent = '...';
+    ellipsis.setAttribute('aria-label', 'repeated 999,992 more times');
+    fragment.appendChild(ellipsis);
+
+    // Two more at the end
+    for (var j = 0; j < 2; j++) {
+      var line2 = document.createElement('div');
+      line2.className = 'syscall-line syscall-line--single';
+      if (!prefersReducedMotion) {
+        line2.style.animationDelay = ((8 + j) * 60 + 200) + 'ms';
+      } else {
+        line2.style.opacity = '1';
+      }
+
+      var label2 = document.createElement('span');
+      label2.className = 'syscall-line__label';
+      label2.textContent = 'recv()';
+      line2.appendChild(label2);
+
+      var packets2 = document.createElement('span');
+      packets2.className = 'syscall-line__packets';
+      var dot2 = document.createElement('span');
+      dot2.className = 'syscall-line__packet';
+      packets2.appendChild(dot2);
+      line2.appendChild(packets2);
+
+      fragment.appendChild(line2);
+    }
+
+    beforeLines.appendChild(fragment);
+  }
+
+  if (afterLines) {
+    var fragment2 = document.createDocumentFragment();
+
+    for (var k = 0; k < 3; k++) {
+      var batchLine = document.createElement('div');
+      batchLine.className = 'syscall-line syscall-line--batch';
+      if (!prefersReducedMotion) {
+        batchLine.style.animationDelay = (k * 120) + 'ms';
+      } else {
+        batchLine.style.opacity = '1';
+      }
+
+      var bLabel = document.createElement('span');
+      bLabel.className = 'syscall-line__label';
+      bLabel.textContent = 'recvmmsg()';
+      batchLine.appendChild(bLabel);
+
+      var bPackets = document.createElement('span');
+      bPackets.className = 'syscall-line__packets';
+      // Show 16 dots to represent batch of 128
+      for (var d = 0; d < 16; d++) {
+        var bDot = document.createElement('span');
+        bDot.className = 'syscall-line__packet';
+        bPackets.appendChild(bDot);
+      }
+      batchLine.appendChild(bPackets);
+
+      var bCount = document.createElement('span');
+      bCount.className = 'syscall-line__label';
+      bCount.textContent = 'x128';
+      batchLine.appendChild(bCount);
+
+      fragment2.appendChild(batchLine);
+    }
+
+    var ellipsis2 = document.createElement('div');
+    ellipsis2.className = 'syscall-line__ellipsis';
+    ellipsis2.textContent = '...';
+    ellipsis2.setAttribute('aria-label', 'repeated ~7,797 more times');
+    fragment2.appendChild(ellipsis2);
+
+    // One more at the end
+    var lastBatch = document.createElement('div');
+    lastBatch.className = 'syscall-line syscall-line--batch';
+    if (!prefersReducedMotion) {
+      lastBatch.style.animationDelay = '500ms';
+    } else {
+      lastBatch.style.opacity = '1';
+    }
+
+    var lLabel = document.createElement('span');
+    lLabel.className = 'syscall-line__label';
+    lLabel.textContent = 'recvmmsg()';
+    lastBatch.appendChild(lLabel);
+
+    var lPackets = document.createElement('span');
+    lPackets.className = 'syscall-line__packets';
+    for (var d2 = 0; d2 < 16; d2++) {
+      var lDot = document.createElement('span');
+      lDot.className = 'syscall-line__packet';
+      lPackets.appendChild(lDot);
+    }
+    lastBatch.appendChild(lPackets);
+
+    var lCount = document.createElement('span');
+    lCount.className = 'syscall-line__label';
+    lCount.textContent = 'x128';
+    lastBatch.appendChild(lCount);
+
+    fragment2.appendChild(lastBatch);
+
+    afterLines.appendChild(fragment2);
+  }
+
+})();
+</script>
+</body>
+</html>
