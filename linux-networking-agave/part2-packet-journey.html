@@ -1,0 +1,2391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Part 2: The Packet's Journey | Linux Networking for Agave Validators</title>
+<meta name="description" content="Part 2 of 7: Trace a UDP packet through the full Linux kernel receive path, from NIC to userspace. From the Turbin3 Advanced SVM cohort.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ========================================
+   CSS CUSTOM PROPERTIES
+   ======================================== */
+:root {
+  --bg-primary: #0a0e17;
+  --bg-secondary: #0f1420;
+  --bg-card: #131927;
+  --bg-card-hover: #1a2236;
+  --bg-code: #0d1219;
+  --bg-highlight: rgba(0, 245, 160, 0.06);
+
+  --accent: #00f5a0;
+  --accent-dim: #00c880;
+  --accent-glow: rgba(0, 245, 160, 0.15);
+  --accent-glow-strong: rgba(0, 245, 160, 0.3);
+
+  --text-primary: #e8ecf4;
+  --text-secondary: #8a94a8;
+  --text-muted: #5a6478;
+  --text-code: #a8d8ea;
+
+  --border: #1e2a3a;
+  --border-accent: rgba(0, 245, 160, 0.2);
+
+  --red: #ff6b6b;
+  --red-dim: rgba(255, 107, 107, 0.12);
+  --orange: #ffa94d;
+  --orange-dim: rgba(255, 169, 77, 0.12);
+  --blue: #4dabf7;
+  --blue-dim: rgba(77, 171, 247, 0.12);
+  --purple: #b197fc;
+  --purple-dim: rgba(177, 151, 252, 0.12);
+  --yellow: #ffd43b;
+  --yellow-dim: rgba(255, 212, 59, 0.12);
+  --cyan: #22d3ee;
+  --cyan-dim: rgba(34, 211, 238, 0.12);
+
+  /* Layer colors */
+  --layer1: #ffa94d;
+  --layer1-dim: rgba(255, 169, 77, 0.10);
+  --layer1-glow: rgba(255, 169, 77, 0.20);
+  --layer2: #4dabf7;
+  --layer2-dim: rgba(77, 171, 247, 0.10);
+  --layer2-glow: rgba(77, 171, 247, 0.20);
+  --layer3: #b197fc;
+  --layer3-dim: rgba(177, 151, 252, 0.10);
+  --layer3-glow: rgba(177, 151, 252, 0.20);
+  --layer4: #00f5a0;
+  --layer4-dim: rgba(0, 245, 160, 0.10);
+  --layer4-glow: rgba(0, 245, 160, 0.20);
+
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.3), 0 1px 4px rgba(0, 0, 0, 0.2);
+  --shadow-glow: 0 0 30px rgba(0, 245, 160, 0.08);
+
+  --max-width: 860px;
+  --spacing-unit: 8px;
+}
+
+/* ========================================
+   RESET & BASE
+   ======================================== */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: 17px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  overflow-x: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  html { scroll-behavior: auto; }
+  .packet-pulse { display: none; }
+}
+
+/* ========================================
+   SERIES NAVIGATION BAR
+   ======================================== */
+.series-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: rgba(10, 14, 23, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 24px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.series-nav__left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.series-nav__label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.series-nav__title {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .series-nav__title { display: block; }
+}
+
+.series-nav__progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.series-nav__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: background 200ms ease, box-shadow 200ms ease;
+}
+
+.series-nav__dot--complete {
+  background: var(--accent-dim);
+}
+
+.series-nav__dot--active {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow-strong);
+}
+
+.series-nav__dot--future {
+  background: var(--text-muted);
+  opacity: 0.3;
+}
+
+/* Reading progress bar */
+.reading-progress {
+  position: fixed;
+  top: 56px;
+  left: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-dim));
+  z-index: 101;
+  width: 0%;
+  transition: width 100ms linear;
+  box-shadow: 0 0 8px var(--accent-glow-strong);
+}
+
+/* ========================================
+   MAIN LAYOUT
+   ======================================== */
+.page-wrapper {
+  padding-top: 80px;
+  padding-bottom: 120px;
+}
+
+.container {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+@media (min-width: 768px) {
+  .container { padding: 0 32px; }
+}
+
+/* ========================================
+   HERO / OPENING
+   ======================================== */
+.hero {
+  padding: 48px 0 64px;
+  position: relative;
+}
+
+.hero__part-label {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hero__part-label::before {
+  content: '';
+  display: inline-block;
+  width: 24px;
+  height: 1px;
+  background: var(--accent);
+}
+
+.hero__title {
+  font-family: var(--font-display);
+  font-size: clamp(32px, 6vw, 52px);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  margin-bottom: 24px;
+}
+
+.hero__title span {
+  color: var(--accent);
+  text-shadow: 0 0 40px var(--accent-glow-strong);
+}
+
+.hero__subtitle {
+  font-size: 18px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  max-width: 640px;
+}
+
+.hero__subtitle strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* ========================================
+   SECTION STYLING
+   ======================================== */
+.section {
+  margin-bottom: 80px;
+}
+
+.section__number {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.section__number::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--border-accent), transparent);
+}
+
+.section__heading {
+  font-family: var(--font-display);
+  font-size: clamp(24px, 4vw, 32px);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-primary);
+  margin-bottom: 24px;
+  letter-spacing: -0.01em;
+}
+
+.section p {
+  margin-bottom: 20px;
+  color: var(--text-secondary);
+}
+
+.section p strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* ========================================
+   CODE INLINE
+   ======================================== */
+code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--bg-code);
+  color: var(--text-code);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+/* ========================================
+   CALLOUT BOX
+   ======================================== */
+.callout {
+  background: var(--bg-highlight);
+  border: 1px solid var(--border-accent);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md);
+  padding: 20px 24px;
+  margin: 28px 0;
+}
+
+.callout__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+
+.callout p {
+  color: var(--text-primary);
+  margin-bottom: 0;
+  font-size: 16px;
+}
+
+.callout p strong {
+  color: var(--accent);
+}
+
+.callout--warn {
+  border-left-color: var(--red);
+}
+
+.callout--warn .callout__label {
+  color: var(--red);
+}
+
+.callout--warn p strong {
+  color: var(--red);
+}
+
+/* ========================================
+   FULL PIPELINE DIAGRAM
+   ======================================== */
+.pipeline {
+  margin: 40px 0;
+  position: relative;
+}
+
+.pipeline__layer-group {
+  margin-bottom: 8px;
+  border-radius: var(--radius-lg);
+  padding: 20px 16px 16px;
+  position: relative;
+  overflow: hidden;
+}
+
+.pipeline__layer-group::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: var(--radius-lg);
+  pointer-events: none;
+}
+
+.pipeline__layer-group--nic {
+  background: var(--layer1-dim);
+  border: 1px solid rgba(255, 169, 77, 0.15);
+}
+.pipeline__layer-group--stack {
+  background: var(--layer2-dim);
+  border: 1px solid rgba(77, 171, 247, 0.15);
+}
+.pipeline__layer-group--socket {
+  background: var(--layer3-dim);
+  border: 1px solid rgba(177, 151, 252, 0.15);
+}
+.pipeline__layer-group--user {
+  background: var(--layer4-dim);
+  border: 1px solid rgba(0, 245, 160, 0.15);
+}
+
+.pipeline__layer-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pipeline__layer-label--nic { color: var(--layer1); }
+.pipeline__layer-label--stack { color: var(--layer2); }
+.pipeline__layer-label--socket { color: var(--layer3); }
+.pipeline__layer-label--user { color: var(--layer4); }
+
+.pipeline__layer-label .step-range {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.pipeline__steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pipeline__step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: border-color 200ms ease, background 200ms ease, transform 150ms ease;
+  white-space: nowrap;
+}
+
+.pipeline__step:hover {
+  transform: translateY(-1px);
+}
+
+.pipeline__step-num {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.pipeline__layer-group--nic .pipeline__step:hover {
+  border-color: var(--layer1);
+  background: rgba(255, 169, 77, 0.08);
+}
+.pipeline__layer-group--nic .pipeline__step-num {
+  background: var(--layer1);
+  color: #0a0e17;
+}
+
+.pipeline__layer-group--stack .pipeline__step:hover {
+  border-color: var(--layer2);
+  background: rgba(77, 171, 247, 0.08);
+}
+.pipeline__layer-group--stack .pipeline__step-num {
+  background: var(--layer2);
+  color: #0a0e17;
+}
+
+.pipeline__layer-group--socket .pipeline__step:hover {
+  border-color: var(--layer3);
+  background: rgba(177, 151, 252, 0.08);
+}
+.pipeline__layer-group--socket .pipeline__step-num {
+  background: var(--layer3);
+  color: #0a0e17;
+}
+
+.pipeline__layer-group--user .pipeline__step:hover {
+  border-color: var(--layer4);
+  background: rgba(0, 245, 160, 0.08);
+}
+.pipeline__layer-group--user .pipeline__step-num {
+  background: var(--layer4);
+  color: #0a0e17;
+}
+
+/* Arrow connectors between groups */
+.pipeline__arrow {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0;
+}
+
+.pipeline__arrow svg {
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+/* ========================================
+   LAYER SECTION HEADER
+   ======================================== */
+.layer-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.layer-header__badge {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.layer-header__badge--l1 { background: var(--layer1-dim); border: 1px solid rgba(255,169,77,0.25); color: var(--layer1); }
+.layer-header__badge--l2 { background: var(--layer2-dim); border: 1px solid rgba(77,171,247,0.25); color: var(--layer2); }
+.layer-header__badge--l3 { background: var(--layer3-dim); border: 1px solid rgba(177,151,252,0.25); color: var(--layer3); }
+.layer-header__badge--l4 { background: var(--layer4-dim); border: 1px solid rgba(0,245,160,0.25); color: var(--layer4); }
+
+.layer-header__text {
+  flex: 1;
+}
+
+.layer-header__layer-name {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.layer-header__layer-name--l1 { color: var(--layer1); }
+.layer-header__layer-name--l2 { color: var(--layer2); }
+.layer-header__layer-name--l3 { color: var(--layer3); }
+.layer-header__layer-name--l4 { color: var(--layer4); }
+
+/* ========================================
+   STEP DETAIL CARDS
+   ======================================== */
+.step-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  margin-bottom: 20px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+
+.step-card:hover {
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow-glow);
+}
+
+.step-card__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.step-card__num {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.step-card__num--l1 { background: var(--layer1); color: #0a0e17; }
+.step-card__num--l2 { background: var(--layer2); color: #0a0e17; }
+.step-card__num--l3 { background: var(--layer3); color: #0a0e17; }
+.step-card__num--l4 { background: var(--layer4); color: #0a0e17; }
+
+.step-card__title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+.step-card__fn {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.step-card p {
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.step-card p:last-child {
+  margin-bottom: 0;
+}
+
+.step-card p strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* Cost badge */
+.cost-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 20px;
+  margin-top: 8px;
+}
+
+.cost-badge--high {
+  background: var(--red-dim);
+  color: var(--red);
+}
+
+.cost-badge--medium {
+  background: var(--orange-dim);
+  color: var(--orange);
+}
+
+.cost-badge--low {
+  background: var(--accent-glow);
+  color: var(--accent);
+}
+
+/* ========================================
+   RX RING BUFFER DIAGRAM
+   ======================================== */
+.rx-ring-container {
+  margin: 32px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.rx-ring {
+  position: relative;
+  width: 260px;
+  height: 260px;
+}
+
+@media (min-width: 640px) {
+  .rx-ring {
+    width: 300px;
+    height: 300px;
+  }
+}
+
+.rx-ring__svg {
+  width: 100%;
+  height: 100%;
+}
+
+.rx-ring__segment {
+  fill: none;
+  stroke-width: 22;
+  stroke-linecap: butt;
+  transition: stroke 300ms ease, opacity 300ms ease;
+}
+
+.rx-ring__segment--empty {
+  stroke: rgba(30, 42, 58, 0.6);
+}
+
+.rx-ring__segment--filled {
+  stroke: var(--layer1);
+  opacity: 0.8;
+}
+
+.rx-ring__segment--dma {
+  stroke: var(--accent);
+  opacity: 1;
+  filter: drop-shadow(0 0 4px var(--accent-glow-strong));
+}
+
+.rx-ring__center-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+
+.rx-ring__center-label {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: block;
+}
+
+.rx-ring__center-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  display: block;
+  margin-top: 2px;
+}
+
+.rx-ring-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: center;
+}
+
+.rx-ring-legend__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.rx-ring-legend__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.rx-ring-legend__dot--empty { background: rgba(30, 42, 58, 0.6); }
+.rx-ring-legend__dot--filled { background: var(--layer1); }
+.rx-ring-legend__dot--dma { background: var(--accent); box-shadow: 0 0 6px var(--accent-glow-strong); }
+
+/* Descriptor table visual */
+.descriptor-table {
+  width: 100%;
+  max-width: 400px;
+  margin: 0 auto;
+}
+
+.descriptor-row {
+  display: grid;
+  grid-template-columns: 50px 1fr 60px;
+  gap: 1px;
+  margin-bottom: 1px;
+}
+
+.descriptor-row--header {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.descriptor-row--header > div {
+  padding: 4px 8px;
+}
+
+.descriptor-cell {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.descriptor-cell--idx {
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.descriptor-cell--active {
+  border-color: var(--accent);
+  background: rgba(0, 245, 160, 0.04);
+}
+
+.descriptor-cell--active .desc-addr {
+  color: var(--accent);
+}
+
+/* ========================================
+   SK_BUFF STRUCT VISUAL
+   ======================================== */
+.skb-struct {
+  max-width: 420px;
+  margin: 32px auto;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.skb-struct__header {
+  padding: 14px 20px;
+  background: rgba(255, 107, 107, 0.06);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.skb-struct__name {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--red);
+}
+
+.skb-struct__size {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--red-dim);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.skb-struct__fields {
+  padding: 4px 0;
+}
+
+.skb-field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  padding: 8px 20px;
+  border-bottom: 1px solid rgba(30, 42, 58, 0.5);
+  transition: background 200ms ease;
+}
+
+.skb-field:last-child {
+  border-bottom: none;
+}
+
+.skb-field:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.skb-field__name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-code);
+}
+
+.skb-field__type {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+/* ========================================
+   SOCKET QUEUE + SPINLOCK VISUAL
+   ======================================== */
+.socket-queue-visual {
+  margin: 32px 0;
+  max-width: 560px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.sq-diagram {
+  position: relative;
+  padding: 24px 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.sq-diagram__title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--layer3);
+  margin-bottom: 16px;
+}
+
+.sq-queue {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 16px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.sq-packet {
+  width: 36px;
+  height: 28px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  flex-shrink: 0;
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+
+.sq-packet--queued {
+  background: rgba(177, 151, 252, 0.2);
+  border: 1px solid rgba(177, 151, 252, 0.3);
+  color: var(--purple);
+}
+
+.sq-packet--incoming {
+  background: rgba(0, 245, 160, 0.15);
+  border: 1px solid rgba(0, 245, 160, 0.25);
+  color: var(--accent);
+}
+
+.sq-packet--dropped {
+  background: rgba(255, 107, 107, 0.12);
+  border: 1px solid rgba(255, 107, 107, 0.25);
+  color: var(--red);
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+
+.sq-arrow {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.sq-lock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: rgba(255, 107, 107, 0.06);
+  border: 1px dashed rgba(255, 107, 107, 0.25);
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+}
+
+.sq-lock__icon {
+  color: var(--red);
+  flex-shrink: 0;
+}
+
+.sq-lock__text {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.sq-lock__text strong {
+  color: var(--red);
+  font-weight: 600;
+}
+
+.sq-meters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.sq-meter {
+  padding: 10px 14px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-sm);
+}
+
+.sq-meter__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.sq-meter__bar {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.sq-meter__fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 600ms ease;
+}
+
+.sq-meter__fill--alloc {
+  background: var(--purple);
+  width: 82%;
+}
+
+.sq-meter__fill--rcvbuf {
+  background: var(--accent);
+  width: 100%;
+}
+
+.sq-meter__value {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* ========================================
+   SYSCALL COST VISUAL
+   ======================================== */
+.syscall-cost {
+  margin: 32px 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+@media (min-width: 640px) {
+  .syscall-cost {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+
+.syscall-stat {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  text-align: center;
+  transition: border-color 200ms ease;
+}
+
+.syscall-stat:hover {
+  border-color: var(--border-accent);
+}
+
+.syscall-stat__value {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.syscall-stat__value--red { color: var(--red); }
+.syscall-stat__value--orange { color: var(--orange); }
+.syscall-stat__value--accent { color: var(--accent); }
+
+.syscall-stat__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+/* ========================================
+   KEY PROPERTIES END CARDS
+   ======================================== */
+.properties-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  margin: 32px 0;
+}
+
+@media (min-width: 640px) {
+  .properties-grid {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+
+.property-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px 20px;
+  text-align: center;
+  transition: border-color 200ms ease, transform 200ms ease;
+}
+
+.property-card:hover {
+  border-color: var(--border-accent);
+  transform: translateY(-2px);
+}
+
+.property-card__icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 14px;
+}
+
+.property-card:nth-child(1) .property-card__icon { background: var(--accent-glow); }
+.property-card:nth-child(2) .property-card__icon { background: var(--blue-dim); }
+.property-card:nth-child(3) .property-card__icon { background: var(--orange-dim); }
+
+.property-card:nth-child(1) .property-card__icon svg { color: var(--accent); }
+.property-card:nth-child(2) .property-card__icon svg { color: var(--blue); }
+.property-card:nth-child(3) .property-card__icon svg { color: var(--orange); }
+
+.property-card__title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.property-card__body {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+/* ========================================
+   NAV CTA (Prev / Next)
+   ======================================== */
+.nav-cta {
+  margin-top: 80px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+@media (min-width: 640px) {
+  .nav-cta { grid-template-columns: 1fr 1fr; }
+}
+
+.nav-cta__card {
+  padding: 28px 24px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  text-decoration: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 200ms ease, box-shadow 200ms ease, transform 150ms ease;
+  cursor: pointer;
+}
+
+.nav-cta__card:hover {
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow-glow);
+  transform: translateY(-2px);
+}
+
+.nav-cta__card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
+.nav-cta__card:hover::before {
+  opacity: 1;
+}
+
+.nav-cta__card--prev {
+  align-items: flex-start;
+}
+
+.nav-cta__card--next {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.nav-cta__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nav-cta__label svg {
+  transition: transform 200ms ease;
+}
+
+.nav-cta__card:hover .nav-cta__label svg {
+  transform: translateX(-3px);
+}
+
+.nav-cta__card--next:hover .nav-cta__label svg {
+  transform: translateX(3px);
+}
+
+.nav-cta__title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* ========================================
+   FOOTER
+   ======================================== */
+.page-footer {
+  margin-top: 60px;
+  padding-top: 32px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+.page-footer p {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.8;
+}
+
+.page-footer a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.page-footer a:hover {
+  text-decoration: underline;
+}
+
+/* ========================================
+   SCROLL ANIMATIONS
+   ======================================== */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 600ms ease, transform 600ms ease;
+}
+
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ========================================
+   FOCUS STYLES
+   ======================================== */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ========================================
+   SELECTION
+   ======================================== */
+::selection {
+  background: var(--accent-glow-strong);
+  color: var(--text-primary);
+}
+
+/* ========================================
+   DECORATIVE BACKGROUND
+   ======================================== */
+.bg-grid {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: -1;
+  background-image:
+    radial-gradient(circle at 50% 0%, rgba(0, 245, 160, 0.03) 0%, transparent 50%),
+    linear-gradient(rgba(30, 42, 58, 0.15) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30, 42, 58, 0.15) 1px, transparent 1px);
+  background-size: 100% 100%, 60px 60px, 60px 60px;
+  mask-image: radial-gradient(ellipse at center top, black 0%, transparent 70%);
+  -webkit-mask-image: radial-gradient(ellipse at center top, black 0%, transparent 70%);
+}
+
+/* ========================================
+   SEPARATOR
+   ======================================== */
+.section-separator {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 64px 0;
+}
+
+.section-separator__line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border), transparent);
+}
+
+.section-separator__icon {
+  color: var(--text-muted);
+  opacity: 0.4;
+}
+
+/* ========================================
+   PACKET ANIMATION DOT
+   ======================================== */
+@keyframes packetFlow {
+  0% { transform: translateY(-8px); opacity: 0; }
+  15% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { transform: translateY(8px); opacity: 0; }
+}
+
+.packet-pulse {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow-strong);
+  animation: packetFlow 2s ease-in-out infinite;
+}
+</style>
+</head>
+<body>
+
+<!-- Background grid -->
+<div class="bg-grid" aria-hidden="true"></div>
+
+<!-- Series navigation -->
+<nav class="series-nav" role="navigation" aria-label="Series navigation">
+  <div class="series-nav__left">
+    <span class="series-nav__label">Part 2 of 7</span>
+    <span class="series-nav__title">Linux Networking for Agave Validators</span>
+  </div>
+  <div class="series-nav__progress" aria-label="Series progress">
+    <div class="series-nav__dot series-nav__dot--complete" aria-label="Part 1, complete"></div>
+    <div class="series-nav__dot series-nav__dot--active" aria-label="Part 2, current"></div>
+    <div class="series-nav__dot series-nav__dot--future" aria-label="Part 3"></div>
+    <div class="series-nav__dot series-nav__dot--future" aria-label="Part 4"></div>
+    <div class="series-nav__dot series-nav__dot--future" aria-label="Part 5"></div>
+    <div class="series-nav__dot series-nav__dot--future" aria-label="Part 6"></div>
+    <div class="series-nav__dot series-nav__dot--future" aria-label="Part 7"></div>
+  </div>
+</nav>
+
+<!-- Reading progress bar -->
+<div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+<main class="page-wrapper">
+  <div class="container">
+
+    <!-- ============================
+         HERO
+         ============================ -->
+    <header class="hero">
+      <div class="hero__part-label">Part 2</div>
+      <h1 class="hero__title">The Packet's <span>Journey</span></h1>
+      <p class="hero__subtitle">
+        A UDP datagram hits your NIC. Before it reaches a single line of Agave code, it
+        travels through <strong>13 steps across four kernel layers</strong>. This is the
+        full Linux UDP receive path: general, compatible, observable, and expensive.
+      </p>
+    </header>
+
+    <!-- ============================
+         SECTION 1: THE BIG PICTURE
+         ============================ -->
+    <section class="section reveal" id="big-picture">
+      <div class="section__number">01</div>
+      <h2 class="section__heading">The Big Picture</h2>
+      <p>
+        Every UDP packet your validator receives follows this exact path through the
+        Linux kernel. No exceptions. No shortcuts. From the moment the Ethernet frame
+        hits the wire to the moment bytes land in your application buffer, the kernel
+        executes a deterministic sequence of operations.
+      </p>
+      <p>
+        The path splits into <strong>four layers</strong>. Each layer has a different
+        job, a different cost profile, and different tuning knobs. Click any step to
+        scroll to its detailed breakdown.
+      </p>
+
+      <!-- Full Pipeline Diagram -->
+      <div class="pipeline reveal">
+        <!-- Layer 1: NIC and Driver -->
+        <div class="pipeline__layer-group pipeline__layer-group--nic">
+          <div class="pipeline__layer-label pipeline__layer-label--nic">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="6" y1="10" x2="6.01" y2="10"/><line x1="10" y1="10" x2="10.01" y2="10"/></svg>
+            Layer 1: NIC &amp; Driver
+            <span class="step-range">Steps 1-5</span>
+          </div>
+          <div class="pipeline__steps">
+            <a href="#step-1" class="pipeline__step"><span class="pipeline__step-num">1</span>NIC Receive</a>
+            <a href="#step-2" class="pipeline__step"><span class="pipeline__step-num">2</span>DMA</a>
+            <a href="#step-3" class="pipeline__step"><span class="pipeline__step-num">3</span>IRQ</a>
+            <a href="#step-4" class="pipeline__step"><span class="pipeline__step-num">4</span>softIRQ / NAPI</a>
+            <a href="#step-5" class="pipeline__step"><span class="pipeline__step-num">5</span>Driver RX Poll</a>
+          </div>
+        </div>
+
+        <div class="pipeline__arrow" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
+        </div>
+
+        <!-- Layer 2: Core Network Stack -->
+        <div class="pipeline__layer-group pipeline__layer-group--stack">
+          <div class="pipeline__layer-label pipeline__layer-label--stack">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg>
+            Layer 2: Core Network Stack
+            <span class="step-range">Steps 6-10</span>
+          </div>
+          <div class="pipeline__steps">
+            <a href="#step-6" class="pipeline__step"><span class="pipeline__step-num">6</span>GRO</a>
+            <a href="#step-7" class="pipeline__step"><span class="pipeline__step-num">7</span>netif_receive_skb</a>
+            <a href="#step-8" class="pipeline__step"><span class="pipeline__step-num">8</span>RPS</a>
+            <a href="#step-9" class="pipeline__step"><span class="pipeline__step-num">9</span>IP Receive</a>
+            <a href="#step-10" class="pipeline__step"><span class="pipeline__step-num">10</span>Local Delivery</a>
+          </div>
+        </div>
+
+        <div class="pipeline__arrow" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
+        </div>
+
+        <!-- Layer 3: UDP Socket Layer -->
+        <div class="pipeline__layer-group pipeline__layer-group--socket">
+          <div class="pipeline__layer-label pipeline__layer-label--socket">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            Layer 3: UDP Socket Layer
+            <span class="step-range">Steps 11-12</span>
+          </div>
+          <div class="pipeline__steps">
+            <a href="#step-11" class="pipeline__step"><span class="pipeline__step-num">11</span>UDP Receive</a>
+            <a href="#step-12" class="pipeline__step"><span class="pipeline__step-num">12</span>Socket Queue</a>
+          </div>
+        </div>
+
+        <div class="pipeline__arrow" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
+        </div>
+
+        <!-- Layer 4: Userspace Boundary -->
+        <div class="pipeline__layer-group pipeline__layer-group--user">
+          <div class="pipeline__layer-label pipeline__layer-label--user">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            Layer 4: Userspace Boundary
+            <span class="step-range">Step 13</span>
+          </div>
+          <div class="pipeline__steps">
+            <a href="#step-13" class="pipeline__step"><span class="pipeline__step-num">13</span>recvmsg / recvmmsg</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout">
+        <div class="callout__label">Key Insight</div>
+        <p>
+          This path is <strong>general</strong> (works with any NIC),
+          <strong>compatible</strong> (tcpdump, iptables, ss all work), and
+          <strong>observable</strong> (BPF, ftrace, perf can trace every step).
+          Those properties come at a cost. Part 3 quantifies exactly where it breaks down.
+        </p>
+      </div>
+    </section>
+
+    <!-- ============================
+         SECTION 2: LAYER 1 - NIC AND DRIVER
+         ============================ -->
+    <section class="section reveal" id="layer-1">
+      <div class="section__number">02</div>
+      <div class="layer-header">
+        <div class="layer-header__badge layer-header__badge--l1">L1</div>
+        <div class="layer-header__text">
+          <div class="layer-header__layer-name layer-header__layer-name--l1">Layer 1: NIC &amp; Driver</div>
+          <h2 class="section__heading" style="margin-bottom:0">Hardware to Kernel Handoff</h2>
+        </div>
+      </div>
+      <p>
+        The packet begins its life on the wire. Before any software runs, hardware does
+        the heavy lifting: accepting the frame, writing it to memory, and signaling the CPU.
+        These five steps happen millions of times per second on a busy validator.
+      </p>
+
+      <!-- Step 1 -->
+      <div class="step-card reveal" id="step-1">
+        <div class="step-card__header">
+          <div class="step-card__num step-card__num--l1">1</div>
+          <div>
+            <div class="step-card__title">NIC Receives the Frame</div>
+          </div>
+        </div>
+        <p>
+          An Ethernet frame arrives on the physical link. The NIC's <strong>MAC filter</strong>
+          checks the destination MAC address. If it matches the interface (or a multicast/broadcast
+          group the NIC subscribes to), the frame is accepted. Otherwise it's dropped in
+          hardware before any CPU involvement.
+        </p>
+        <p>
+          For a validator receiving Turbine shreds, gossip messages, and QUIC datagrams,
+          this is the first gate. The NIC's MAC filter is extremely fast but imprecise. It
+          only filters by Layer 2 address, not by IP or port.
+        </p>
+      </div>
+
+      <!-- Step 2: DMA + RX Ring diagram -->
+      <div class="step-card reveal" id="step-2">
+        <div class="step-card__header">
+          <div class="step-card__num step-card__num--l1">2</div>
+          <div>
+            <div class="step-card__title">DMA Into the RX Ring Buffer</div>
+          </div>
+        </div>
+        <p>
+          The NIC writes the raw Ethernet frame directly into host memory via
+          <strong>DMA (Direct Memory Access)</strong>. Zero CPU involvement.
+          The target is a <strong>pre-allocated RX ring buffer</strong>: a circular array
+          of descriptors (typically 256 to 4,096 entries). Each descriptor points to a
+          memory buffer where the NIC can deposit a frame.
+        </p>
+
+        <!-- RX Ring Visual -->
+        <div class="rx-ring-container">
+          <div class="rx-ring" aria-label="Circular RX ring buffer with 16 slots, showing filled and empty descriptors">
+            <svg class="rx-ring__svg" viewBox="0 0 200 200" id="rxRingSvg">
+              <!-- Segments will be drawn by JS -->
+            </svg>
+            <div class="rx-ring__center-text">
+              <span class="rx-ring__center-label">RX Ring</span>
+              <span class="rx-ring__center-sub">256-4096 descriptors</span>
+            </div>
+          </div>
+          <div class="rx-ring-legend">
+            <div class="rx-ring-legend__item">
+              <div class="rx-ring-legend__dot rx-ring-legend__dot--empty"></div>
+              Empty slot
+            </div>
+            <div class="rx-ring-legend__item">
+              <div class="rx-ring-legend__dot rx-ring-legend__dot--filled"></div>
+              Packet waiting
+            </div>
+            <div class="rx-ring-legend__item">
+              <div class="rx-ring-legend__dot rx-ring-legend__dot--dma"></div>
+              DMA write in progress
+            </div>
+          </div>
+        </div>
+
+        <div class="callout--warn callout">
+          <div class="callout__label">Silent Drop</div>
+          <p>
+            If the ring fills up because software can't drain it fast enough, incoming
+            packets are <strong>silently dropped at the NIC</strong>. No error to the
+            sender. No log entry. The only trace is a bump in
+            <code>rx_missed_errors</code> visible via <code>ethtool -S</code>.
+          </p>
+        </div>
+      </div>
+
+      <!-- Step 3: IRQ -->
+      <div class="step-card reveal" id="step-3">
+        <div class="step-card__header">
+          <div class="step-card__num step-card__num--l1">3</div>
+          <div>
+            <div class="step-card__title">Hardware Interrupt (IRQ)</div>
+          </div>
+        </div>
+        <p>
+          After writing the frame to memory, the NIC fires a <strong>hardware interrupt</strong>
+          to notify the CPU that new data is available. This is expensive: it forces a
+          <strong>context switch</strong>, flushes caches, and disrupts whatever the
+          CPU was doing.
+        </p>
+        <p>
+          <strong>Interrupt coalescing</strong> (<code>ethtool -C</code>) batches multiple
+          packet arrivals into a single interrupt notification. Instead of one IRQ per packet,
+          the NIC waits a configurable delay or packet count before firing. This trades a
+          small amount of latency for a large reduction in interrupt overhead at high packet
+          rates.
+        </p>
+        <span class="cost-badge cost-badge--high">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          Context switch + cache flush per IRQ
+        </span>
+      </div>
+
+      <!-- Step 4: softIRQ / NAPI -->
+      <div class="step-card reveal" id="step-4">
+        <div class="step-card__header">
+          <div class="step-card__num step-card__num--l1">4</div>
+          <div>
+            <div class="step-card__title">softIRQ and NAPI Polling</div>
+          </div>
+        </div>
+        <p>
+          Linux splits interrupt handling into two halves. The <strong>top half</strong>
+          (hardIRQ handler) does minimal work: it disables further interrupts from
+          the NIC, schedules a softIRQ (<code>NET_RX_SOFTIRQ</code>), and returns
+          immediately. This must be fast because it blocks all other interrupts on
+          that CPU core.
+        </p>
+        <p>
+          The <strong>bottom half</strong> (softIRQ context) is where real processing
+          happens. NAPI (New API) polls the RX ring in a loop, processing a
+          <strong>budget of 64 packets per poll call</strong>, up to
+          <strong>300 packets per softIRQ cycle</strong>. When the ring drains below
+          a threshold, NAPI re-enables hardware interrupts and goes back to sleep.
+        </p>
+        <p>
+          If softIRQ processing takes too long or too many cycles are consumed, the
+          kernel's <strong>ksoftirqd</strong> thread takes over. This is a regular
+          kernel thread with lower scheduling priority, which means packet processing
+          competes with other work on that core.
+        </p>
+        <span class="cost-badge cost-badge--medium">Budget: 64 pkts/poll, 300 pkts/softIRQ cycle</span>
+      </div>
+
+      <!-- Step 5: Driver RX Poll + sk_buff -->
+      <div class="step-card reveal" id="step-5">
+        <div class="step-card__header">
+          <div class="step-card__num step-card__num--l1">5</div>
+          <div>
+            <div class="step-card__title">Driver RX Poll and sk_buff Allocation</div>
+            <div class="step-card__fn">NAPI poll callback (e.g. igb_poll)</div>
+          </div>
+        </div>
+        <p>
+          The driver's NAPI poll function harvests packets from the RX ring and allocates
+          a fresh <code>sk_buff</code> (socket buffer) structure for <strong>every single
+          packet</strong>. This is the first major cost center in the entire path.
+        </p>
+        <p>
+          An <code>sk_buff</code> is approximately <strong>240 bytes</strong> of metadata,
+          allocated from the kernel's SLAB/SLUB allocator. At 1 million packets per second,
+          the driver performs <strong>2 million allocator operations per second</strong>
+          (one alloc + one free per packet). Each allocation touches cache lines, contends
+          on per-CPU freelists, and adds pressure to the memory subsystem.
+        </p>
+
+        <!-- sk_buff struct visual -->
+        <div class="skb-struct">
+          <div class="skb-struct__header">
+            <span class="skb-struct__name">struct sk_buff</span>
+            <span class="skb-struct__size">~240 bytes</span>
+          </div>
+          <div class="skb-struct__fields">
+            <div class="skb-field">
+              <span class="skb-field__name">*head, *data, *tail, *end</span>
+              <span class="skb-field__type">buffer pointers</span>
+            </div>
+            <div class="skb-field">
+              <span class="skb-field__name">len, data_len</span>
+              <span class="skb-field__type">u32</span>
+            </div>
+            <div class="skb-field">
+              <span class="skb-field__name">protocol, pkt_type</span>
+              <span class="skb-field__type">__be16, u8</span>
+            </div>
+            <div class="skb-field">
+              <span class="skb-field__name">*sk (socket backref)</span>
+              <span class="skb-field__type">struct sock*</span>
+            </div>
+            <div class="skb-field">
+              <span class="skb-field__name">*dev (net device)</span>
+              <span class="skb-field__type">struct net_device*</span>
+            </div>
+            <div class="skb-field">
+              <span class="skb-field__name">cb[48] (control buffer)</span>
+              <span class="skb-field__type">char[]</span>
+            </div>
+            <div class="skb-field">
+              <span class="skb-field__name">hash, queue_mapping</span>
+              <span class="skb-field__type">u32, u16</span>
+            </div>
+            <div class="skb-field">
+              <span class="skb-field__name">tstamp</span>
+              <span class="skb-field__type">ktime_t</span>
+            </div>
+            <div class="skb-field">
+              <span class="skb-field__name">destructor, *frag_list...</span>
+              <span class="skb-field__type">callbacks</span>
+            </div>
+          </div>
+        </div>
+
+        <span class="cost-badge cost-badge--high">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          1M pps = 2M SLAB alloc/free ops per second
+        </span>
+      </div>
+    </section>
+
+    <!-- Separator -->
+    <div class="section-separator reveal" aria-hidden="true">
+      <div class="section-separator__line"></div>
+      <div class="section-separator__icon">
+        <span class="packet-pulse"></span>
+      </div>
+      <div class="section-separator__line"></div>
+    </div>
+
+    <!-- ============================
+         SECTION 3: LAYER 2 - CORE NETWORK STACK
+         ============================ -->
+    <section class="section reveal" id="layer-2">
+      <div class="section__number">03</div>
+      <div class="layer-header">
+        <div class="layer-header__badge layer-header__badge--l2">L2</div>
+        <div class="layer-header__text">
+          <div class="layer-header__layer-name layer-header__layer-name--l2">Layer 2: Core Network Stack</div>
+          <h2 class="section__heading" style="margin-bottom:0">Protocol Processing</h2>
+        </div>
+      </div>
+      <p>
+        The <code>sk_buff</code> is now alive. The kernel routes it through the generic
+        network stack: packet coalescing, CPU steering, IP validation, routing, and
+        firewall hooks. Every packet, regardless of protocol, walks this path.
+      </p>
+
+      <!-- Step 6: GRO -->
+      <div class="step-card reveal" id="step-6">
+        <div class="step-card__header">
+          <div class="step-card__num step-card__num--l2">6</div>
+          <div>
+            <div class="step-card__title">GRO (Generic Receive Offload)</div>
+          </div>
+        </div>
+        <p>
+          GRO attempts to coalesce multiple small packets into larger ones before pushing
+          them up the stack. This reduces the per-packet overhead for upper layers by
+          amortizing header processing across several frames.
+        </p>
+        <p>
+          GRO is highly effective for <strong>TCP</strong>, where many sequential segments
+          on the same flow can be merged. For <strong>UDP</strong> on Solana, the benefit
+          is limited. Validator traffic consists of diverse, independent datagrams from
+          many sources. GRO can group some flows (same 5-tuple) but the hit rate is low
+          for typical gossip and shred traffic.
+        </p>
+        <span class="cost-badge cost-badge--low">Low impact for varied UDP traffic</span>
+      </div>
+
+      <!-- Step 7: netif_receive_skb -->
+      <div class="step-card reveal" id="step-7">
+        <div class="step-card__header">
+          <div class="step-card__num step-card__num--l2">7</div>
+          <div>
+            <div class="step-card__title">netif_receive_skb</div>
+            <div class="step-card__fn">Main entry into the network stack</div>
+          </div>
+        </div>
+        <p>
+          This is the central dispatch function. It examines the <code>EtherType</code>
+          field in the Ethernet header to determine which protocol handler should receive
+          the packet. IPv4 packets go to <code>ip_rcv()</code>, IPv6 to
+          <code>ipv6_rcv()</code>, ARP to <code>arp_rcv()</code>.
+        </p>
+        <p>
+          Any packet-tap interfaces also hook in here. If <code>tcpdump</code> is running,
+          <strong>every packet is copied to the tap socket at this point</strong>,
+          even before any filtering. This is why running tcpdump on a busy validator
+          adds measurable overhead.
+        </p>
+      </div>
+
+      <!-- Step 8: RPS -->
+      <div class="step-card reveal" id="step-8">
+        <div class="step-card__header">
+          <div class="step-card__num step-card__num--l2">8</div>
+          <div>
+            <div class="step-card__title">RPS (Receive Packet Steering)</div>
+          </div>
+        </div>
+        <p>
+          RPS is the <strong>software equivalent of hardware RSS</strong> (Receive Side
+          Scaling). It hashes the packet's flow tuple (source IP, dest IP, source port,
+          dest port, protocol) and uses the hash to steer the packet to a specific CPU
+          core for processing.
+        </p>
+        <p>
+          Without RPS or RSS, all packets from a single NIC queue are processed on the
+          same CPU core, creating a bottleneck. RPS spreads the load by re-queuing the
+          <code>sk_buff</code> to another CPU via <strong>inter-processor interrupt (IPI)</strong>.
+          The IPI itself has overhead, but it's worthwhile when one core is saturated.
+        </p>
+        <span class="cost-badge cost-badge--medium">IPI cost per packet when steering across cores</span>
+      </div>
+
+      <!-- Step 9: IP Receive -->
+      <div class="step-card reveal" id="step-9">
+        <div class="step-card__header">
+          <div class="step-card__num step-card__num--l2">9</div>
+          <div>
+            <div class="step-card__title">IP Receive</div>
+            <div class="step-card__fn">ip_rcv() -> ip_rcv_finish()</div>
+          </div>
+        </div>
+        <p>
+          The IP layer validates the packet header: version field, header checksum, TTL.
+          It performs a <strong>routing table lookup</strong> to determine whether the
+          packet is destined for a local socket, needs forwarding, or should be dropped.
+        </p>
+        <p>
+          The <strong>Netfilter PREROUTING hook</strong> runs here. Even if your iptables
+          rules are empty, the kernel still traverses the hook chain to check. If IP
+          fragmentation reassembly is needed, it happens at this stage too. Fragmentation
+          is rare for Solana traffic since shreds are sized to fit a single datagram.
+        </p>
+      </div>
+
+      <!-- Step 10: Local Delivery -->
+      <div class="step-card reveal" id="step-10">
+        <div class="step-card__header">
+          <div class="step-card__num step-card__num--l2">10</div>
+          <div>
+            <div class="step-card__title">Local Delivery</div>
+            <div class="step-card__fn">ip_local_deliver() -> ip_local_deliver_finish()</div>
+          </div>
+        </div>
+        <p>
+          After the routing decision confirms this packet is destined for a local socket,
+          <code>ip_local_deliver()</code> runs. The <strong>Netfilter LOCAL_IN hook</strong>
+          fires here. This is where your <code>iptables INPUT</code> rules execute.
+        </p>
+        <p>
+          Even empty iptables rules mean traversing hook chains per packet. If connection
+          tracking (<code>conntrack</code>) is loaded, the kernel allocates
+          <strong>per-flow tracking structures</strong> at this point. For a validator
+          receiving traffic from thousands of unique sources, conntrack can become a
+          significant memory and CPU consumer.
+        </p>
+        <span class="cost-badge cost-badge--high">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          Netfilter hooks + conntrack per packet
+        </span>
+      </div>
+    </section>
+
+    <!-- Separator -->
+    <div class="section-separator reveal" aria-hidden="true">
+      <div class="section-separator__line"></div>
+      <div class="section-separator__icon">
+        <span class="packet-pulse"></span>
+      </div>
+      <div class="section-separator__line"></div>
+    </div>
+
+    <!-- ============================
+         SECTION 4: LAYER 3 - UDP SOCKET LAYER
+         ============================ -->
+    <section class="section reveal" id="layer-3">
+      <div class="section__number">04</div>
+      <div class="layer-header">
+        <div class="layer-header__badge layer-header__badge--l3">L3</div>
+        <div class="layer-header__text">
+          <div class="layer-header__layer-name layer-header__layer-name--l3">Layer 3: UDP Socket Layer</div>
+          <h2 class="section__heading" style="margin-bottom:0">Socket Lookup and Queueing</h2>
+        </div>
+      </div>
+      <p>
+        The packet has survived IP processing and Netfilter. Now the kernel must find the
+        right socket and park the packet in its receive queue. Two steps, but both carry
+        hidden contention points.
+      </p>
+
+      <!-- Step 11: UDP Receive -->
+      <div class="step-card reveal" id="step-11">
+        <div class="step-card__header">
+          <div class="step-card__num step-card__num--l3">11</div>
+          <div>
+            <div class="step-card__title">UDP Receive and Socket Lookup</div>
+            <div class="step-card__fn">udp_rcv() / __udp4_lib_rcv()</div>
+          </div>
+        </div>
+        <p>
+          The UDP layer looks up the destination socket in a <strong>hash table</strong>
+          keyed by (destination IP + destination port). For a validator with a handful of
+          listening sockets, this lookup is fast. The kernel also performs
+          <strong>UDP checksum verification</strong> at this stage unless the NIC already
+          offloaded it.
+        </p>
+        <p>
+          If <strong>early demux</strong> is enabled (it usually is), the kernel tries to
+          cache the socket lookup result from a previous packet in the same flow, skipping
+          the hash table search. BPF socket filters, if attached, execute here as well.
+        </p>
+      </div>
+
+      <!-- Step 12: Socket Queue + Spinlock visual -->
+      <div class="step-card reveal" id="step-12">
+        <div class="step-card__header">
+          <div class="step-card__num step-card__num--l3">12</div>
+          <div>
+            <div class="step-card__title">Socket Receive Queue</div>
+            <div class="step-card__fn">udp_queue_rcv_skb() -> sock_queue_rcv_skb()</div>
+          </div>
+        </div>
+        <p>
+          The <code>sk_buff</code> is appended to the socket's receive queue. This queue
+          is a linked list of <code>sk_buff</code> structures, and appending to it requires
+          holding a <strong>spinlock</strong>. Under high packet rates with multiple CPU
+          cores delivering to the same socket, this lock becomes a contention point.
+        </p>
+
+        <!-- Socket queue diagram -->
+        <div class="socket-queue-visual">
+          <div class="sq-diagram">
+            <div class="sq-diagram__title">Socket Receive Queue</div>
+
+            <div class="sq-lock">
+              <div class="sq-lock__icon">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </div>
+              <div class="sq-lock__text">
+                <strong>spinlock</strong> protects queue access. Multiple CPUs contend here.
+              </div>
+            </div>
+
+            <div class="sq-queue" aria-label="Socket receive queue showing queued packets, incoming packet, and dropped packet">
+              <div class="sq-packet sq-packet--queued">skb</div>
+              <div class="sq-packet sq-packet--queued">skb</div>
+              <div class="sq-packet sq-packet--queued">skb</div>
+              <div class="sq-packet sq-packet--queued">skb</div>
+              <div class="sq-packet sq-packet--queued">skb</div>
+              <div class="sq-packet sq-packet--queued">skb</div>
+              <div class="sq-packet sq-packet--queued">skb</div>
+              <div class="sq-packet sq-packet--queued">skb</div>
+              <div class="sq-arrow">...</div>
+              <div class="sq-packet sq-packet--incoming">new</div>
+              <div class="sq-arrow">|</div>
+              <div class="sq-packet sq-packet--dropped">drop</div>
+            </div>
+
+            <div class="sq-meters">
+              <div class="sq-meter">
+                <div class="sq-meter__label">sk_rmem_alloc</div>
+                <div class="sq-meter__bar"><div class="sq-meter__fill sq-meter__fill--alloc"></div></div>
+                <div class="sq-meter__value">82% of limit</div>
+              </div>
+              <div class="sq-meter">
+                <div class="sq-meter__label">sk_rcvbuf</div>
+                <div class="sq-meter__bar"><div class="sq-meter__fill sq-meter__fill--rcvbuf"></div></div>
+                <div class="sq-meter__value">212992 bytes (default)</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout--warn callout">
+          <div class="callout__label">Silent Drop (again)</div>
+          <p>
+            Buffer accounting checks <code>sk_rmem_alloc</code> against
+            <code>sk_rcvbuf</code>. If the socket buffer is full, the packet is
+            <strong>silently dropped</strong>. No backpressure signal is sent to the
+            sender. No error returned to the application. The kernel simply frees the
+            <code>sk_buff</code> and increments a drop counter. At validator packet rates,
+            this is the most common reason for packet loss.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Separator -->
+    <div class="section-separator reveal" aria-hidden="true">
+      <div class="section-separator__line"></div>
+      <div class="section-separator__icon">
+        <span class="packet-pulse"></span>
+      </div>
+      <div class="section-separator__line"></div>
+    </div>
+
+    <!-- ============================
+         SECTION 5: LAYER 4 - USERSPACE BOUNDARY
+         ============================ -->
+    <section class="section reveal" id="layer-4">
+      <div class="section__number">05</div>
+      <div class="layer-header">
+        <div class="layer-header__badge layer-header__badge--l4">L4</div>
+        <div class="layer-header__text">
+          <div class="layer-header__layer-name layer-header__layer-name--l4">Layer 4: Userspace Boundary</div>
+          <h2 class="section__heading" style="margin-bottom:0">The Final Copy</h2>
+        </div>
+      </div>
+      <p>
+        The packet is sitting in the socket queue, waiting. The Agave validator's streamer
+        thread calls a system call to pull it across the kernel-to-userspace boundary.
+        This last step is deceptively expensive.
+      </p>
+
+      <!-- Step 13: recvmsg / recvmmsg -->
+      <div class="step-card reveal" id="step-13">
+        <div class="step-card__header">
+          <div class="step-card__num step-card__num--l4">13</div>
+          <div>
+            <div class="step-card__title">recvmsg and recvmmsg</div>
+            <div class="step-card__fn">udp_recvmsg() -> copy_to_user()</div>
+          </div>
+        </div>
+        <p>
+          The application calls <code>recvmsg()</code> (one packet at a time) or
+          <code>recvmmsg()</code> (batch of packets in one syscall). Each call is a
+          <strong>system call</strong>: user-to-kernel context switch. On
+          Spectre-mitigated kernels, this adds approximately <strong>100-200ns per
+          syscall</strong> for the indirect branch prediction barriers.
+        </p>
+        <p>
+          Inside the kernel, <code>udp_recvmsg()</code> dequeues the <code>sk_buff</code>
+          from the socket's receive queue and calls <code>copy_to_user()</code> to copy
+          the payload data into the application's buffer. This is a real
+          <strong>memcpy</strong> operation. At 1M packets per second with 1,232-byte
+          payloads (Turbine shred size), that's roughly <strong>1.2 GB/s of pure
+          memory copy</strong>.
+        </p>
+        <p>
+          After the copy, the <code>sk_buff</code> is freed. This isn't a simple
+          <code>kfree()</code>. The destructor callbacks run (socket buffer accounting
+          updates, memory charge adjustments), and the 240-byte struct returns to the
+          SLAB allocator. One more allocator operation per packet.
+        </p>
+
+        <!-- Syscall cost stats -->
+        <div class="syscall-cost">
+          <div class="syscall-stat">
+            <div class="syscall-stat__value syscall-stat__value--red">100-200ns</div>
+            <div class="syscall-stat__label">Spectre syscall overhead</div>
+          </div>
+          <div class="syscall-stat">
+            <div class="syscall-stat__value syscall-stat__value--orange">~1.2 GB/s</div>
+            <div class="syscall-stat__label">memcpy at 1M pps x 1232B</div>
+          </div>
+          <div class="syscall-stat">
+            <div class="syscall-stat__value syscall-stat__value--accent">2M</div>
+            <div class="syscall-stat__label">allocator ops/sec at 1M pps</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================
+         SECTION 6: KEY PROPERTIES
+         ============================ -->
+    <section class="section reveal" id="properties">
+      <div class="section__number">06</div>
+      <h2 class="section__heading">What This Path Gives You</h2>
+      <p>
+        The classic kernel networking path exists for good reason. These 13 steps buy
+        three properties that matter for debugging, security, and compatibility.
+        The next part of this series explains exactly where those properties start
+        costing more than they're worth at validator packet rates.
+      </p>
+
+      <div class="properties-grid">
+        <div class="property-card">
+          <div class="property-card__icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          </div>
+          <h3 class="property-card__title">General</h3>
+          <p class="property-card__body">
+            Works with any NIC from any vendor. No driver-specific code paths. No
+            hardware dependencies. Plug in a NIC, load the driver, and this path works.
+          </p>
+        </div>
+
+        <div class="property-card">
+          <div class="property-card__icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </div>
+          <h3 class="property-card__title">Compatible</h3>
+          <p class="property-card__body">
+            <code>tcpdump</code>, <code>iptables</code>, <code>ss</code>,
+            <code>netstat</code> all work. Every standard Linux networking tool
+            integrates with this path because it goes through all the standard hooks.
+          </p>
+        </div>
+
+        <div class="property-card">
+          <div class="property-card__icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </div>
+          <h3 class="property-card__title">Observable</h3>
+          <p class="property-card__body">
+            BPF, ftrace, and perf can trace every step. You can instrument any function
+            in the path, count packets at any layer, and measure latency between any two
+            points.
+          </p>
+        </div>
+      </div>
+
+      <div class="callout">
+        <div class="callout__label">Looking Ahead</div>
+        <p>
+          General. Compatible. Observable. These are real advantages. But at validator
+          packet rates, the cost of maintaining these properties through
+          <strong>13 steps of per-packet processing</strong> becomes the bottleneck itself.
+          Part 3 measures exactly where and how much.
+        </p>
+      </div>
+    </section>
+
+    <!-- ============================
+         NAV CTAs
+         ============================ -->
+    <div class="nav-cta reveal">
+      <a href="part1-why-udp.html" class="nav-cta__card nav-cta__card--prev">
+        <span class="nav-cta__label">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+          Previous: Part 1
+        </span>
+        <span class="nav-cta__title">Why Solana Chose UDP</span>
+      </a>
+      <a href="part3-why-it-breaks.html" class="nav-cta__card nav-cta__card--next">
+        <span class="nav-cta__label">
+          Next: Part 3
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        </span>
+        <span class="nav-cta__title">Why It Breaks at Scale</span>
+      </a>
+    </div>
+
+    <!-- ============================
+         FOOTER
+         ============================ -->
+    <footer class="page-footer">
+      <p>
+        Linux Networking for Agave Validators<br>
+        <a href="https://turbin3.com" target="_blank" rel="noopener">Turbin3</a> Advanced SVM Cohort, Q2 2026
+      </p>
+    </footer>
+
+  </div>
+</main>
+
+<script>
+(function() {
+  'use strict';
+
+  // ============================
+  // Reading Progress Bar
+  // ============================
+  var progressBar = document.getElementById('readingProgress');
+  var ticking = false;
+
+  function updateProgress() {
+    var scrollTop = window.scrollY;
+    var docHeight = document.documentElement.scrollHeight - window.innerHeight;
+    var progress = docHeight > 0 ? (scrollTop / docHeight) * 100 : 0;
+    progressBar.style.width = progress + '%';
+    ticking = false;
+  }
+
+  window.addEventListener('scroll', function() {
+    if (!ticking) {
+      requestAnimationFrame(updateProgress);
+      ticking = true;
+    }
+  }, { passive: true });
+
+  // ============================
+  // Scroll Reveal (Intersection Observer)
+  // ============================
+  var prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  if (!prefersReducedMotion) {
+    var revealElements = document.querySelectorAll('.reveal');
+    var observer = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, {
+      threshold: 0.1,
+      rootMargin: '0px 0px -60px 0px'
+    });
+
+    revealElements.forEach(function(el) {
+      observer.observe(el);
+    });
+  } else {
+    document.querySelectorAll('.reveal').forEach(function(el) {
+      el.classList.add('visible');
+    });
+  }
+
+  // ============================
+  // RX Ring Buffer SVG Drawing
+  // ============================
+  var svg = document.getElementById('rxRingSvg');
+  if (svg) {
+    var totalSegments = 24;
+    var cx = 100;
+    var cy = 100;
+    var r = 78;
+    var gapAngle = 2;
+    var segAngle = (360 / totalSegments) - gapAngle;
+
+    // Define segment states: 0=empty, 1=filled, 2=dma-active
+    var states = [
+      1,1,1,1,1,1,1,1,  // 8 filled
+      2,                  // 1 DMA active
+      0,0,0,0,0,0,0,     // 7 empty
+      1,1,1,1,1,1,0,0    // 6 filled, 2 empty
+    ];
+
+    function polarToCartesian(cx, cy, r, angleDeg) {
+      var rad = (angleDeg - 90) * Math.PI / 180;
+      return {
+        x: cx + r * Math.cos(rad),
+        y: cy + r * Math.sin(rad)
+      };
+    }
+
+    function describeArc(cx, cy, r, startAngle, endAngle) {
+      var start = polarToCartesian(cx, cy, r, endAngle);
+      var end = polarToCartesian(cx, cy, r, startAngle);
+      var largeArcFlag = endAngle - startAngle <= 180 ? '0' : '1';
+      return [
+        'M', start.x, start.y,
+        'A', r, r, 0, largeArcFlag, 0, end.x, end.y
+      ].join(' ');
+    }
+
+    for (var i = 0; i < totalSegments; i++) {
+      var startAngle = i * (segAngle + gapAngle);
+      var endAngle = startAngle + segAngle;
+      var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', describeArc(cx, cy, r, startAngle, endAngle));
+      path.setAttribute('class', 'rx-ring__segment');
+
+      var state = states[i] || 0;
+      if (state === 0) {
+        path.classList.add('rx-ring__segment--empty');
+      } else if (state === 1) {
+        path.classList.add('rx-ring__segment--filled');
+      } else {
+        path.classList.add('rx-ring__segment--dma');
+      }
+
+      // Stagger animation
+      path.style.opacity = '0';
+      path.style.transition = 'opacity 400ms ease ' + (i * 40) + 'ms';
+
+      svg.appendChild(path);
+    }
+
+    // Trigger ring segment fade-in when visible
+    var ringContainer = svg.closest('.rx-ring-container');
+    if (ringContainer) {
+      var ringObserver = new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) {
+          if (entry.isIntersecting) {
+            var segments = svg.querySelectorAll('.rx-ring__segment');
+            segments.forEach(function(seg) {
+              var state = seg.classList.contains('rx-ring__segment--empty') ? 0 :
+                          seg.classList.contains('rx-ring__segment--filled') ? 1 : 2;
+              if (state === 0) seg.style.opacity = '0.6';
+              else if (state === 1) seg.style.opacity = '0.8';
+              else seg.style.opacity = '1';
+            });
+            ringObserver.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.3 });
+      ringObserver.observe(ringContainer);
+    }
+  }
+
+  // ============================
+  // Smooth scroll for pipeline step links
+  // ============================
+  document.querySelectorAll('.pipeline__step').forEach(function(link) {
+    link.addEventListener('click', function(e) {
+      e.preventDefault();
+      var targetId = this.getAttribute('href');
+      var target = document.querySelector(targetId);
+      if (target) {
+        var offset = 80;
+        var top = target.getBoundingClientRect().top + window.scrollY - offset;
+        window.scrollTo({ top: top, behavior: 'smooth' });
+
+        // Flash highlight
+        target.style.borderColor = 'var(--accent)';
+        target.style.boxShadow = '0 0 30px var(--accent-glow-strong)';
+        setTimeout(function() {
+          target.style.borderColor = '';
+          target.style.boxShadow = '';
+        }, 1500);
+      }
+    });
+  });
+
+  // ============================
+  // Socket queue meter animation
+  // ============================
+  var sqMeters = document.querySelectorAll('.sq-meter__fill');
+  if (sqMeters.length > 0) {
+    var metersObserver = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          // Meters animate via CSS transition when width changes
+          // They're already set in CSS, so just ensuring they're visible
+          metersObserver.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.3 });
+
+    sqMeters.forEach(function(meter) {
+      // Start at 0 width, animate to target
+      var targetWidth = meter.style.width || window.getComputedStyle(meter).width;
+      meter.style.width = '0%';
+      metersObserver.observe(meter.closest('.sq-diagram'));
+    });
+
+    // Re-observe to trigger animation
+    var sqDiagram = document.querySelector('.sq-diagram');
+    if (sqDiagram) {
+      var sqObserver = new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) {
+          if (entry.isIntersecting) {
+            var fills = entry.target.querySelectorAll('.sq-meter__fill');
+            fills.forEach(function(fill) {
+              if (fill.classList.contains('sq-meter__fill--alloc')) {
+                fill.style.width = '82%';
+              } else if (fill.classList.contains('sq-meter__fill--rcvbuf')) {
+                fill.style.width = '100%';
+              }
+            });
+            sqObserver.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.3 });
+      sqObserver.observe(sqDiagram);
+    }
+  }
+
+})();
+</script>
+</body>
+</html>
