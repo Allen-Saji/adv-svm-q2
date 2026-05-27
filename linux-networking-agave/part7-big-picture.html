@@ -1,0 +1,2260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Part 7: The Big Picture | Linux Networking for Agave Validators</title>
+<meta name="description" content="Part 7 of 7: Classic vs XDP vs AF_XDP, Agave in practice, Firedancer's full bypass, and the story arc of the entire series. From the Turbin3 Advanced SVM cohort.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ========================================
+   CSS CUSTOM PROPERTIES
+   ======================================== */
+:root {
+  --bg-primary: #0a0e17;
+  --bg-secondary: #0f1420;
+  --bg-card: #131927;
+  --bg-card-hover: #1a2236;
+  --bg-code: #0d1219;
+  --bg-highlight: rgba(0, 245, 160, 0.06);
+
+  --accent: #00f5a0;
+  --accent-dim: #00c880;
+  --accent-glow: rgba(0, 245, 160, 0.15);
+  --accent-glow-strong: rgba(0, 245, 160, 0.3);
+
+  --text-primary: #e8ecf4;
+  --text-secondary: #8a94a8;
+  --text-muted: #5a6478;
+  --text-code: #a8d8ea;
+
+  --border: #1e2a3a;
+  --border-accent: rgba(0, 245, 160, 0.2);
+
+  --red: #ff6b6b;
+  --red-dim: rgba(255, 107, 107, 0.12);
+  --orange: #ffa94d;
+  --orange-dim: rgba(255, 169, 77, 0.12);
+  --blue: #4dabf7;
+  --blue-dim: rgba(77, 171, 247, 0.12);
+  --purple: #b197fc;
+  --purple-dim: rgba(177, 151, 252, 0.12);
+  --yellow: #ffd43b;
+  --yellow-dim: rgba(255, 212, 59, 0.12);
+  --cyan: #22d3ee;
+  --cyan-dim: rgba(34, 211, 238, 0.12);
+
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.3), 0 1px 4px rgba(0, 0, 0, 0.2);
+  --shadow-glow: 0 0 30px rgba(0, 245, 160, 0.08);
+
+  --max-width: 900px;
+  --spacing-unit: 8px;
+}
+
+/* ========================================
+   RESET & BASE
+   ======================================== */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: 17px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  overflow-x: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  html { scroll-behavior: auto; }
+  .reveal { opacity: 1; transform: none; }
+  .series-arc-node { opacity: 1; transform: none; }
+}
+
+/* ========================================
+   SERIES NAVIGATION BAR
+   ======================================== */
+.series-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: rgba(10, 14, 23, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 24px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.series-nav__left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.series-nav__label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.series-nav__title {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .series-nav__title { display: block; }
+}
+
+.series-nav__right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.series-nav__progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.series-nav__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: background 200ms ease, box-shadow 200ms ease;
+}
+
+.series-nav__dot--done {
+  background: var(--accent-dim);
+}
+
+.series-nav__dot--active {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow-strong);
+}
+
+.series-nav__links {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .series-nav__links { display: flex; gap: 8px; }
+}
+
+.series-nav__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-decoration: none;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  transition: color 200ms ease, border-color 200ms ease, background 200ms ease;
+  cursor: pointer;
+}
+
+.series-nav__link:hover {
+  color: var(--accent);
+  border-color: var(--border-accent);
+  background: var(--bg-highlight);
+}
+
+/* Reading progress bar */
+.reading-progress {
+  position: fixed;
+  top: 56px;
+  left: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-dim));
+  z-index: 101;
+  width: 0%;
+  transition: width 100ms linear;
+  box-shadow: 0 0 8px var(--accent-glow-strong);
+}
+
+/* ========================================
+   MAIN LAYOUT
+   ======================================== */
+.page-wrapper {
+  padding-top: 80px;
+  padding-bottom: 120px;
+}
+
+.container {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+@media (min-width: 768px) {
+  .container { padding: 0 32px; }
+}
+
+/* ========================================
+   HERO / OPENING
+   ======================================== */
+.hero {
+  padding: 48px 0 64px;
+  position: relative;
+}
+
+.hero__part-label {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hero__part-label::before {
+  content: '';
+  display: inline-block;
+  width: 24px;
+  height: 1px;
+  background: var(--accent);
+}
+
+.hero__title {
+  font-family: var(--font-display);
+  font-size: clamp(32px, 6vw, 52px);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  margin-bottom: 24px;
+}
+
+.hero__title span {
+  color: var(--accent);
+  text-shadow: 0 0 40px var(--accent-glow-strong);
+}
+
+.hero__subtitle {
+  font-size: 18px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  max-width: 680px;
+}
+
+.hero__subtitle strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* ========================================
+   SECTION STYLING
+   ======================================== */
+.section {
+  margin-bottom: 80px;
+}
+
+.section__number {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.section__number::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--border-accent), transparent);
+}
+
+.section__heading {
+  font-family: var(--font-display);
+  font-size: clamp(24px, 4vw, 32px);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-primary);
+  margin-bottom: 24px;
+  letter-spacing: -0.01em;
+}
+
+.section p {
+  margin-bottom: 20px;
+  color: var(--text-secondary);
+}
+
+.section p strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.section p code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--bg-code);
+  color: var(--text-code);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+.section h3 {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 36px 0 16px;
+}
+
+/* ========================================
+   ANALOGY / CALLOUT
+   ======================================== */
+.analogy {
+  background: var(--bg-highlight);
+  border: 1px solid var(--border-accent);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md);
+  padding: 20px 24px;
+  margin: 28px 0;
+}
+
+.analogy__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+
+.analogy p {
+  color: var(--text-primary);
+  margin-bottom: 0;
+  font-size: 16px;
+}
+
+.analogy p strong {
+  color: var(--accent);
+}
+
+/* ========================================
+   THE BIG COMPARISON TABLE
+   ======================================== */
+.comparison-table-wrap {
+  margin: 40px 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+}
+
+.comparison-table-wrap__title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 20px 24px 0;
+}
+
+.comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  min-width: 640px;
+}
+
+.comparison-table thead th {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-align: left;
+  padding: 16px 16px 14px;
+  border-bottom: 2px solid var(--border);
+  white-space: nowrap;
+}
+
+.comparison-table thead th:first-child {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.comparison-table thead th:nth-child(2) {
+  color: var(--text-secondary);
+}
+
+.comparison-table thead th:nth-child(3) {
+  color: var(--accent);
+}
+
+.comparison-table thead th:nth-child(4) {
+  color: var(--blue);
+}
+
+.comparison-table tbody td {
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(30, 42, 58, 0.5);
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+  vertical-align: top;
+}
+
+.comparison-table tbody td:first-child {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.comparison-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.comparison-table tbody tr:hover td {
+  background: rgba(0, 245, 160, 0.02);
+}
+
+/* Color-coded cells */
+.cell--high {
+  color: var(--red) !important;
+}
+.cell--medium {
+  color: var(--orange) !important;
+}
+.cell--low {
+  color: var(--accent) !important;
+}
+.cell--none {
+  color: var(--accent) !important;
+  font-weight: 500;
+}
+.cell--na {
+  color: var(--text-muted) !important;
+  font-style: italic;
+}
+
+.comparison-table code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--bg-code);
+  color: var(--text-code);
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
+
+/* Table legend */
+.table-legend {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding: 12px 16px 16px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.table-legend__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.table-legend__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.table-legend__dot--high { background: var(--red); }
+.table-legend__dot--medium { background: var(--orange); }
+.table-legend__dot--low { background: var(--accent); }
+
+.table-legend__label {
+  color: var(--text-muted);
+}
+
+/* ========================================
+   XDP SHAPING SECTION
+   ======================================== */
+.shaping-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+  margin: 36px 0;
+}
+
+@media (min-width: 640px) {
+  .shaping-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.shaping-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  transition: border-color 200ms ease, transform 200ms ease;
+  cursor: default;
+}
+
+.shaping-card:hover {
+  border-color: var(--border-accent);
+  transform: translateY(-2px);
+}
+
+.shaping-card__icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+.shaping-card:nth-child(1) .shaping-card__icon { background: var(--blue-dim); color: var(--blue); }
+.shaping-card:nth-child(2) .shaping-card__icon { background: var(--purple-dim); color: var(--purple); }
+.shaping-card:nth-child(3) .shaping-card__icon { background: var(--orange-dim); color: var(--orange); }
+.shaping-card:nth-child(4) .shaping-card__icon { background: var(--cyan-dim); color: var(--cyan); }
+
+.shaping-card__title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.shaping-card__body {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.shaping-card__body strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.shaping-card__body code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--bg-code);
+  color: var(--text-code);
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
+
+/* ========================================
+   CODE POINTER CARDS (IDE-style)
+   ======================================== */
+.code-pointers {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 36px 0;
+}
+
+.code-pointer {
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+  cursor: pointer;
+}
+
+.code-pointer:hover {
+  border-color: var(--border-accent);
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.25);
+}
+
+.code-pointer__tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.code-pointer__tab-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.code-pointer__tab-dot--rs { background: var(--orange); }
+.code-pointer__tab-dot--xdp { background: var(--accent); }
+
+.code-pointer__tab-filename {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.code-pointer__tab-line {
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.code-pointer__body {
+  padding: 12px 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.code-pointer__icon {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2px;
+}
+
+.code-pointer__icon--recv { background: var(--blue-dim); color: var(--blue); }
+.code-pointer__icon--send { background: var(--purple-dim); color: var(--purple); }
+.code-pointer__icon--xdp { background: var(--accent-glow); color: var(--accent); }
+.code-pointer__icon--socket { background: var(--cyan-dim); color: var(--cyan); }
+.code-pointer__icon--quic { background: var(--orange-dim); color: var(--orange); }
+
+.code-pointer__desc {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.code-pointer__desc strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.code-pointer__desc code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  color: var(--yellow);
+}
+
+/* ========================================
+   FIREDANCER CALLOUT
+   ======================================== */
+.firedancer-section {
+  margin: 48px 0;
+  background: linear-gradient(135deg, rgba(255, 107, 107, 0.04), rgba(255, 169, 77, 0.04));
+  border: 1px solid rgba(255, 107, 107, 0.15);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  position: relative;
+}
+
+.firedancer-section::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--red), var(--orange), var(--red));
+}
+
+.firedancer-header {
+  padding: 24px 28px 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.firedancer-header__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--orange);
+  background: var(--orange-dim);
+  padding: 4px 12px;
+  border-radius: 4px;
+}
+
+.firedancer-header__title {
+  font-family: var(--font-display);
+  font-size: clamp(20px, 3vw, 26px);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.firedancer-header__title span {
+  color: var(--orange);
+}
+
+.firedancer-body {
+  padding: 20px 28px 28px;
+}
+
+.firedancer-body p {
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+}
+
+.firedancer-body p strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.firedancer-body p code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--bg-code);
+  color: var(--text-code);
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
+
+/* Stats row */
+.firedancer-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 24px 0 20px;
+}
+
+@media (min-width: 640px) {
+  .firedancer-stats {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.firedancer-stat {
+  text-align: center;
+  padding: 16px 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 169, 77, 0.1);
+}
+
+.firedancer-stat__value {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--orange);
+  line-height: 1.2;
+}
+
+.firedancer-stat__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* Contrast callout */
+.firedancer-contrast {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+@media (min-width: 520px) {
+  .firedancer-contrast {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.firedancer-contrast__card {
+  padding: 16px 20px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+
+.firedancer-contrast__card--agave {
+  background: var(--accent-glow);
+  border-color: var(--border-accent);
+}
+
+.firedancer-contrast__card--fd {
+  background: var(--orange-dim);
+  border-color: rgba(255, 169, 77, 0.2);
+}
+
+.firedancer-contrast__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.firedancer-contrast__card--agave .firedancer-contrast__label {
+  color: var(--accent);
+}
+
+.firedancer-contrast__card--fd .firedancer-contrast__label {
+  color: var(--orange);
+}
+
+.firedancer-contrast__text {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.firedancer-contrast__text strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* Feature list */
+.firedancer-features {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 20px 0 0;
+}
+
+.firedancer-feature {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.firedancer-feature__bullet {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--orange);
+  margin-top: 8px;
+}
+
+.firedancer-feature strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.firedancer-feature code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--text-code);
+}
+
+/* ========================================
+   SERIES ARC TIMELINE (horizontal)
+   ======================================== */
+.series-arc {
+  margin: 48px 0;
+  padding: 32px 24px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.series-arc__title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.series-arc__track {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  min-width: 780px;
+  padding: 0 8px;
+}
+
+/* The connecting line behind nodes */
+.series-arc__line {
+  position: absolute;
+  top: 20px;
+  left: 28px;
+  right: 28px;
+  height: 2px;
+  background: linear-gradient(90deg,
+    var(--blue) 0%,
+    var(--blue) 14%,
+    var(--purple) 28%,
+    var(--red) 42%,
+    var(--accent-dim) 57%,
+    var(--accent) 71%,
+    var(--cyan) 85%,
+    var(--yellow) 100%
+  );
+  border-radius: 1px;
+  z-index: 0;
+}
+
+.series-arc-node {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  z-index: 1;
+  min-width: 100px;
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 400ms ease, transform 400ms ease;
+}
+
+.series-arc-node.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.series-arc-node__dot {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  border: 2px solid;
+  background: var(--bg-primary);
+  margin-bottom: 12px;
+  flex-shrink: 0;
+  transition: box-shadow 300ms ease;
+}
+
+.series-arc-node--1 .series-arc-node__dot { border-color: var(--blue); color: var(--blue); }
+.series-arc-node--2 .series-arc-node__dot { border-color: var(--blue); color: var(--blue); }
+.series-arc-node--3 .series-arc-node__dot { border-color: var(--purple); color: var(--purple); }
+.series-arc-node--4 .series-arc-node__dot { border-color: var(--red); color: var(--red); }
+.series-arc-node--5 .series-arc-node__dot { border-color: var(--accent-dim); color: var(--accent-dim); }
+.series-arc-node--6 .series-arc-node__dot { border-color: var(--accent); color: var(--accent); }
+.series-arc-node--7 .series-arc-node__dot {
+  border-color: var(--yellow);
+  color: var(--yellow);
+  box-shadow: 0 0 16px var(--yellow-dim);
+}
+
+/* Fill inner dot for completed parts */
+.series-arc-node__dot::after {
+  content: '';
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  position: absolute;
+}
+
+.series-arc-node--1 .series-arc-node__dot::after,
+.series-arc-node--2 .series-arc-node__dot::after,
+.series-arc-node--3 .series-arc-node__dot::after,
+.series-arc-node--4 .series-arc-node__dot::after,
+.series-arc-node--5 .series-arc-node__dot::after,
+.series-arc-node--6 .series-arc-node__dot::after {
+  background: currentColor;
+  opacity: 0.3;
+}
+
+.series-arc-node--7 .series-arc-node__dot::after {
+  background: var(--yellow);
+  opacity: 0.5;
+}
+
+.series-arc-node__label {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-align: center;
+  margin-bottom: 4px;
+  line-height: 1.3;
+  max-width: 110px;
+}
+
+.series-arc-node__desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.4;
+  max-width: 110px;
+}
+
+.series-arc-node--7 .series-arc-node__label {
+  color: var(--yellow);
+}
+
+/* Narrative arc labels */
+.series-arc__phases {
+  display: flex;
+  min-width: 780px;
+  padding: 20px 8px 0;
+}
+
+.series-arc__phase {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+}
+
+.series-arc__phase-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 4px 10px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.series-arc__phase--problem {
+  flex: 3;
+}
+.series-arc__phase--tools {
+  flex: 2;
+}
+.series-arc__phase--solution {
+  flex: 2;
+}
+
+.series-arc__phase--problem .series-arc__phase-label {
+  color: var(--red);
+  background: var(--red-dim);
+}
+
+.series-arc__phase--tools .series-arc__phase-label {
+  color: var(--purple);
+  background: var(--purple-dim);
+}
+
+.series-arc__phase--solution .series-arc__phase-label {
+  color: var(--accent);
+  background: var(--accent-glow);
+}
+
+/* ========================================
+   TAKEAWAY CARDS
+   ======================================== */
+.takeaways {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+  margin: 40px 0;
+}
+
+@media (min-width: 768px) {
+  .takeaways {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+
+.takeaway-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 28px 24px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 300ms ease, transform 200ms ease, box-shadow 200ms ease;
+  cursor: default;
+}
+
+.takeaway-card:hover {
+  border-color: var(--border-accent);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-card);
+}
+
+.takeaway-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+}
+
+.takeaway-card:nth-child(1)::before { background: var(--accent); }
+.takeaway-card:nth-child(2)::before { background: var(--blue); }
+.takeaway-card:nth-child(3)::before { background: var(--purple); }
+
+.takeaway-card__number {
+  font-family: var(--font-display);
+  font-size: 48px;
+  font-weight: 700;
+  line-height: 1;
+  margin-bottom: 12px;
+  opacity: 0.12;
+}
+
+.takeaway-card:nth-child(1) .takeaway-card__number { color: var(--accent); }
+.takeaway-card:nth-child(2) .takeaway-card__number { color: var(--blue); }
+.takeaway-card:nth-child(3) .takeaway-card__number { color: var(--purple); }
+
+.takeaway-card__title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+  line-height: 1.3;
+}
+
+.takeaway-card__body {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+
+.takeaway-card__body strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* ========================================
+   SERIES COMPLETE INDICATOR
+   ======================================== */
+.series-complete {
+  margin: 80px 0 0;
+  text-align: center;
+  position: relative;
+}
+
+.series-complete__line {
+  width: 48px;
+  height: 2px;
+  background: var(--accent);
+  margin: 0 auto 24px;
+  border-radius: 1px;
+}
+
+.series-complete__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 28px;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-xl);
+  background: var(--bg-highlight);
+}
+
+.series-complete__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent-glow-strong);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; box-shadow: 0 0 12px var(--accent-glow-strong); }
+  50% { opacity: 0.6; box-shadow: 0 0 20px var(--accent-glow); }
+}
+
+.series-complete__text {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+}
+
+.series-complete__subtext {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 16px;
+}
+
+/* ========================================
+   PREV NAV (single, no "next")
+   ======================================== */
+.nav-cta {
+  margin-top: 80px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  max-width: 360px;
+}
+
+.nav-cta__card {
+  padding: 28px 24px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: relative;
+  overflow: hidden;
+  text-decoration: none;
+  transition: border-color 200ms ease, box-shadow 200ms ease, transform 200ms ease;
+  cursor: pointer;
+}
+
+.nav-cta__card:hover {
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow-glow);
+  transform: translateY(-2px);
+}
+
+.nav-cta__card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+}
+
+.nav-cta__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.nav-cta__title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.nav-cta__link-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.nav-cta__link-row svg {
+  transition: transform 200ms ease;
+}
+
+.nav-cta__card:hover .nav-cta__link-row svg {
+  transform: translateX(-3px);
+}
+
+/* ========================================
+   FOOTER
+   ======================================== */
+.page-footer {
+  margin-top: 60px;
+  padding-top: 32px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+.page-footer p {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.8;
+}
+
+.page-footer a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.page-footer a:hover {
+  text-decoration: underline;
+}
+
+/* ========================================
+   SCROLL ANIMATIONS
+   ======================================== */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 600ms ease, transform 600ms ease;
+}
+
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.reveal-delay-1 { transition-delay: 100ms; }
+.reveal-delay-2 { transition-delay: 200ms; }
+.reveal-delay-3 { transition-delay: 300ms; }
+.reveal-delay-4 { transition-delay: 400ms; }
+.reveal-delay-5 { transition-delay: 500ms; }
+.reveal-delay-6 { transition-delay: 600ms; }
+
+/* ========================================
+   FOCUS STYLES
+   ======================================== */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ========================================
+   SELECTION
+   ======================================== */
+::selection {
+  background: var(--accent-glow-strong);
+  color: var(--text-primary);
+}
+
+/* ========================================
+   DECORATIVE BACKGROUND
+   ======================================== */
+.bg-grid {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: -1;
+  background-image:
+    radial-gradient(circle at 50% 0%, rgba(0, 245, 160, 0.03) 0%, transparent 50%),
+    linear-gradient(rgba(30, 42, 58, 0.15) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30, 42, 58, 0.15) 1px, transparent 1px);
+  background-size: 100% 100%, 60px 60px, 60px 60px;
+  mask-image: radial-gradient(ellipse at center top, black 0%, transparent 70%);
+  -webkit-mask-image: radial-gradient(ellipse at center top, black 0%, transparent 70%);
+}
+
+/* ========================================
+   MOBILE-FRIENDLY TABLE CARDS (sub-640)
+   ======================================== */
+@media (max-width: 639px) {
+  .comparison-table-wrap {
+    border: none;
+    background: transparent;
+  }
+
+  .comparison-table-wrap__title {
+    padding: 0 0 16px;
+  }
+
+  .comparison-table { display: none; }
+  .table-legend { display: none; }
+
+  .mobile-comparison { display: block; }
+}
+
+@media (min-width: 640px) {
+  .mobile-comparison { display: none; }
+}
+
+.mobile-comparison {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mobile-comp-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+}
+
+.mobile-comp-card__dimension {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 10px;
+  letter-spacing: 0.04em;
+}
+
+.mobile-comp-card__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.mobile-comp-card__row:last-child {
+  margin-bottom: 0;
+}
+
+.mobile-comp-card__col-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+  min-width: 72px;
+  padding-top: 2px;
+}
+
+.mobile-comp-card__col-label--classic { color: var(--text-muted); }
+.mobile-comp-card__col-label--xdp { color: var(--accent-dim); }
+.mobile-comp-card__col-label--afxdp { color: var(--blue); }
+
+.mobile-comp-card__col-value {
+  color: var(--text-secondary);
+}
+</style>
+</head>
+<body>
+
+<div class="bg-grid" aria-hidden="true"></div>
+
+<!-- ============================
+     SERIES NAV BAR
+     ============================ -->
+<nav class="series-nav" aria-label="Series navigation">
+  <div class="series-nav__left">
+    <span class="series-nav__label">Part 7 of 7</span>
+    <span class="series-nav__title">Linux Networking for Agave Validators</span>
+  </div>
+  <div class="series-nav__right">
+    <div class="series-nav__progress" aria-label="Progress: Part 7 of 7">
+      <div class="series-nav__dot series-nav__dot--done" title="Part 1: Why UDP"></div>
+      <div class="series-nav__dot series-nav__dot--done" title="Part 2: Packet Journey"></div>
+      <div class="series-nav__dot series-nav__dot--done" title="Part 3: Why It Breaks"></div>
+      <div class="series-nav__dot series-nav__dot--done" title="Part 4: eBPF"></div>
+      <div class="series-nav__dot series-nav__dot--done" title="Part 5: XDP"></div>
+      <div class="series-nav__dot series-nav__dot--done" title="Part 6: AF_XDP"></div>
+      <div class="series-nav__dot series-nav__dot--active" title="Part 7: Big Picture"></div>
+    </div>
+    <div class="series-nav__links">
+      <a href="part6-af-xdp.html" class="series-nav__link">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+        Prev
+      </a>
+    </div>
+  </div>
+</nav>
+
+<div class="reading-progress" id="readingProgress" role="progressbar" aria-label="Reading progress"></div>
+
+<!-- ============================
+     MAIN CONTENT
+     ============================ -->
+<main class="page-wrapper">
+  <div class="container">
+
+    <!-- HERO -->
+    <header class="hero reveal">
+      <div class="hero__part-label">Part 7 - Final</div>
+      <h1 class="hero__title">The <span>Big Picture</span></h1>
+      <p class="hero__subtitle">
+        Seven parts, one story. From raw UDP sockets to zero-copy kernel bypass,
+        every layer exists to solve the same problem: <strong>move packets faster
+        than the kernel's default path allows</strong>.
+      </p>
+    </header>
+
+    <!-- ============================
+         SECTION 1: THE COMPLETE COMPARISON
+         ============================ -->
+    <section class="section reveal" id="comparison">
+      <div class="section__number">01</div>
+      <h2 class="section__heading">The Complete Comparison</h2>
+      <p>
+        This table summarizes the entire series. Three approaches to handling packets on a
+        Solana validator, ranked by how much kernel overhead each one skips. Cloudflare
+        documented these same tradeoffs at scale across their global edge network.
+      </p>
+
+      <div class="comparison-table-wrap reveal">
+        <div class="comparison-table-wrap__title">Classic UDP vs XDP vs AF_XDP</div>
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>Dimension</th>
+              <th>Classic UDP</th>
+              <th>XDP</th>
+              <th>AF_XDP</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>sk_buff</code></td>
+              <td class="cell--high">Yes, allocated per packet</td>
+              <td class="cell--low">Avoided early (on DROP/REDIRECT)</td>
+              <td class="cell--none">None for redirected packets</td>
+            </tr>
+            <tr>
+              <td>IP/UDP parsing</td>
+              <td class="cell--high">Full kernel parsing</td>
+              <td class="cell--medium">Only eBPF program parses what it needs</td>
+              <td class="cell--low">Userspace parses</td>
+            </tr>
+            <tr>
+              <td>Netfilter</td>
+              <td class="cell--high">Multiple hook traversals</td>
+              <td class="cell--none">None if not XDP_PASS</td>
+              <td class="cell--none">None</td>
+            </tr>
+            <tr>
+              <td>Receive API</td>
+              <td><code>recvmsg</code> / <code>recvmmsg</code> syscall</td>
+              <td class="cell--na">XDP action return code</td>
+              <td class="cell--low">Ring poll (no syscall)</td>
+            </tr>
+            <tr>
+              <td>Copies</td>
+              <td class="cell--high">Payload copy (kernel to userspace)</td>
+              <td class="cell--na">N/A (filter only)</td>
+              <td class="cell--none">Zero-copy: DMA to UMEM</td>
+            </tr>
+            <tr>
+              <td>CPU per Mpps</td>
+              <td class="cell--high">High</td>
+              <td class="cell--medium">Medium</td>
+              <td class="cell--low">Very low</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="table-legend">
+          <div class="table-legend__item">
+            <div class="table-legend__dot table-legend__dot--high"></div>
+            <span class="table-legend__label">More overhead</span>
+          </div>
+          <div class="table-legend__item">
+            <div class="table-legend__dot table-legend__dot--medium"></div>
+            <span class="table-legend__label">Partial bypass</span>
+          </div>
+          <div class="table-legend__item">
+            <div class="table-legend__dot table-legend__dot--low"></div>
+            <span class="table-legend__label">Minimal / zero overhead</span>
+          </div>
+        </div>
+
+        <!-- Mobile-friendly card version -->
+        <div class="mobile-comparison">
+          <div class="mobile-comp-card">
+            <div class="mobile-comp-card__dimension">sk_buff</div>
+            <div class="mobile-comp-card__row">
+              <span class="mobile-comp-card__col-label mobile-comp-card__col-label--classic">Classic</span>
+              <span class="mobile-comp-card__col-value">Yes, allocated per packet</span>
+            </div>
+            <div class="mobile-comp-card__row">
+              <span class="mobile-comp-card__col-label mobile-comp-card__col-label--xdp">XDP</span>
+              <span class="mobile-comp-card__col-value">Avoided early (on DROP/REDIRECT)</span>
+            </div>
+            <div class="mobile-comp-card__row">
+              <span class="mobile-comp-card__col-label mobile-comp-card__col-label--afxdp">AF_XDP</span>
+              <span class="mobile-comp-card__col-value">None for redirected packets</span>
+            </div>
+          </div>
+          <div class="mobile-comp-card">
+            <div class="mobile-comp-card__dimension">IP/UDP Parsing</div>
+            <div class="mobile-comp-card__row">
+              <span class="mobile-comp-card__col-label mobile-comp-card__col-label--classic">Classic</span>
+              <span class="mobile-comp-card__col-value">Full kernel parsing</span>
+            </div>
+            <div class="mobile-comp-card__row">
+              <span class="mobile-comp-card__col-label mobile-comp-card__col-label--xdp">XDP</span>
+              <span class="mobile-comp-card__col-value">eBPF parses what it needs</span>
+            </div>
+            <div class="mobile-comp-card__row">
+              <span class="mobile-comp-card__col-label mobile-comp-card__col-label--afxdp">AF_XDP</span>
+              <span class="mobile-comp-card__col-value">Userspace parses</span>
+            </div>
+          </div>
+          <div class="mobile-comp-card">
+            <div class="mobile-comp-card__dimension">Netfilter</div>
+            <div class="mobile-comp-card__row">
+              <span class="mobile-comp-card__col-label mobile-comp-card__col-label--classic">Classic</span>
+              <span class="mobile-comp-card__col-value">Multiple hook traversals</span>
+            </div>
+            <div class="mobile-comp-card__row">
+              <span class="mobile-comp-card__col-label mobile-comp-card__col-label--xdp">XDP</span>
+              <span class="mobile-comp-card__col-value">None if not XDP_PASS</span>
+            </div>
+            <div class="mobile-comp-card__row">
+              <span class="mobile-comp-card__col-label mobile-comp-card__col-label--afxdp">AF_XDP</span>
+              <span class="mobile-comp-card__col-value">None</span>
+            </div>
+          </div>
+          <div class="mobile-comp-card">
+            <div class="mobile-comp-card__dimension">Receive API</div>
+            <div class="mobile-comp-card__row">
+              <span class="mobile-comp-card__col-label mobile-comp-card__col-label--classic">Classic</span>
+              <span class="mobile-comp-card__col-value">recvmsg / recvmmsg syscall</span>
+            </div>
+            <div class="mobile-comp-card__row">
+              <span class="mobile-comp-card__col-label mobile-comp-card__col-label--xdp">XDP</span>
+              <span class="mobile-comp-card__col-value">XDP action return code</span>
+            </div>
+            <div class="mobile-comp-card__row">
+              <span class="mobile-comp-card__col-label mobile-comp-card__col-label--afxdp">AF_XDP</span>
+              <span class="mobile-comp-card__col-value">Ring poll (no syscall)</span>
+            </div>
+          </div>
+          <div class="mobile-comp-card">
+            <div class="mobile-comp-card__dimension">Copies</div>
+            <div class="mobile-comp-card__row">
+              <span class="mobile-comp-card__col-label mobile-comp-card__col-label--classic">Classic</span>
+              <span class="mobile-comp-card__col-value">Payload copy (kernel to userspace)</span>
+            </div>
+            <div class="mobile-comp-card__row">
+              <span class="mobile-comp-card__col-label mobile-comp-card__col-label--xdp">XDP</span>
+              <span class="mobile-comp-card__col-value">N/A (filter only)</span>
+            </div>
+            <div class="mobile-comp-card__row">
+              <span class="mobile-comp-card__col-label mobile-comp-card__col-label--afxdp">AF_XDP</span>
+              <span class="mobile-comp-card__col-value">Zero-copy: DMA to UMEM</span>
+            </div>
+          </div>
+          <div class="mobile-comp-card">
+            <div class="mobile-comp-card__dimension">CPU per Mpps</div>
+            <div class="mobile-comp-card__row">
+              <span class="mobile-comp-card__col-label mobile-comp-card__col-label--classic">Classic</span>
+              <span class="mobile-comp-card__col-value">High</span>
+            </div>
+            <div class="mobile-comp-card__row">
+              <span class="mobile-comp-card__col-label mobile-comp-card__col-label--xdp">XDP</span>
+              <span class="mobile-comp-card__col-value">Medium</span>
+            </div>
+            <div class="mobile-comp-card__row">
+              <span class="mobile-comp-card__col-label mobile-comp-card__col-label--afxdp">AF_XDP</span>
+              <span class="mobile-comp-card__col-value">Very low</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="analogy reveal">
+        <div class="analogy__label">The Core Tradeoff</div>
+        <p>
+          Every step right on this table trades <strong>generality for speed</strong>.
+          Classic UDP works with any NIC, any kernel config, any firewall. AF_XDP needs
+          driver support, dedicated memory, custom parsing. Pick the layer that matches
+          your performance requirement.
+        </p>
+      </div>
+    </section>
+
+    <!-- ============================
+         SECTION 2: XDP + eBPF SHAPING MODERN I/O
+         ============================ -->
+    <section class="section reveal" id="shaping">
+      <div class="section__number">02</div>
+      <h2 class="section__heading">How XDP + eBPF Shape Modern I/O</h2>
+      <p>
+        XDP is not just a Solana optimization. It is now the standard interface between
+        Linux and high-performance hardware. The same pattern (early programmable hooks,
+        kernel bypass, zero-copy) appears in every modern I/O subsystem.
+      </p>
+
+      <div class="shaping-grid">
+        <div class="shaping-card reveal">
+          <div class="shaping-card__icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+          </div>
+          <div class="shaping-card__title">I/O Drivers</div>
+          <div class="shaping-card__body">
+            XDP is the standard way modern NIC drivers are built. <strong>Mellanox mlx5, Intel ice/igc, AMD</strong>
+            all expose an early eBPF hook inside the RX path. Vendors build XDP support directly
+            into driver firmware and DMA rings for zero-copy, low-latency I/O.
+          </div>
+        </div>
+
+        <div class="shaping-card reveal reveal-delay-1">
+          <div class="shaping-card__icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          </div>
+          <div class="shaping-card__title">Packet Schedulers</div>
+          <div class="shaping-card__body">
+            Linux Traffic Control now attaches eBPF programs (<code>BPF_PROG_TYPE_SCHED_CLS</code>,
+            <code>BPF_PROG_TYPE_SCHED_ACT</code>) directly to queueing disciplines. Fully programmable,
+            stateful packet schedulers (FQ, Cake) that <strong>run at line-rate</strong> without leaving
+            the driver.
+          </div>
+        </div>
+
+        <div class="shaping-card reveal reveal-delay-2">
+          <div class="shaping-card__icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </div>
+          <div class="shaping-card__title">CPU / SoftIRQ Schedulers</div>
+          <div class="shaping-card__body">
+            NAPI polling + XDP turns the old interrupt-driven model into a <strong>cooperative scheduler</strong>.
+            The kernel decides when to poll, and XDP lets you steer or drop packets before they reach
+            the softIRQ scheduler.
+          </div>
+        </div>
+
+        <div class="shaping-card reveal reveal-delay-3">
+          <div class="shaping-card__icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          </div>
+          <div class="shaping-card__title">The General Pattern</div>
+          <div class="shaping-card__body">
+            Same architecture everywhere: <strong>early programmable hooks</strong> (eBPF/XDP)
+            + <strong>kernel bypass</strong> (AF_XDP, io_uring) + <strong>zero-copy</strong>.
+            This is the foundation for all high-performance networking, storage, and tracing
+            in modern kernels.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================
+         SECTION 3: AGAVE CODE POINTERS
+         ============================ -->
+    <section class="section reveal" id="code-pointers">
+      <div class="section__number">03</div>
+      <h2 class="section__heading">Agave Code Pointers</h2>
+      <p>
+        The patterns from this series map directly to real code in the Agave validator.
+        These are the entry points for anyone reading the codebase. Each card shows the
+        function chain and the file where the hot path lives.
+      </p>
+
+      <div class="code-pointers">
+        <!-- Batched UDP receive -->
+        <div class="code-pointer reveal">
+          <div class="code-pointer__tab">
+            <div class="code-pointer__tab-dot code-pointer__tab-dot--rs"></div>
+            <span class="code-pointer__tab-filename">streamer.rs</span>
+            <span class="code-pointer__tab-line">#L160</span>
+          </div>
+          <div class="code-pointer__body">
+            <div class="code-pointer__icon code-pointer__icon--recv">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+            </div>
+            <div class="code-pointer__desc">
+              <strong>Batched UDP receive.</strong>
+              <code>recv_loop</code> calls <code>packet::recv_from</code> which fans out to
+              <code>recv_mmsg</code> for batch reception.
+            </div>
+          </div>
+        </div>
+
+        <!-- Linux recvmmsg -->
+        <div class="code-pointer reveal reveal-delay-1">
+          <div class="code-pointer__tab">
+            <div class="code-pointer__tab-dot code-pointer__tab-dot--rs"></div>
+            <span class="code-pointer__tab-filename">recvmmsg.rs</span>
+            <span class="code-pointer__tab-line">#L94</span>
+          </div>
+          <div class="code-pointer__body">
+            <div class="code-pointer__icon code-pointer__icon--recv">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            </div>
+            <div class="code-pointer__desc">
+              <strong>Linux recvmmsg.</strong>
+              Builds <code>mmsghdr</code> / <code>iovec</code> arrays and calls
+              <code>libc::recvmmsg</code> to receive multiple UDP packets in a single syscall.
+            </div>
+          </div>
+        </div>
+
+        <!-- Batched UDP send -->
+        <div class="code-pointer reveal reveal-delay-2">
+          <div class="code-pointer__tab">
+            <div class="code-pointer__tab-dot code-pointer__tab-dot--rs"></div>
+            <span class="code-pointer__tab-filename">sendmmsg.rs</span>
+            <span class="code-pointer__tab-line">#L208</span>
+          </div>
+          <div class="code-pointer__body">
+            <div class="code-pointer__icon code-pointer__icon--send">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </div>
+            <div class="code-pointer__desc">
+              <strong>Batched UDP send.</strong>
+              <code>batch_send</code> routes through <code>sendmmsg</code> helpers to transmit
+              multiple packets per syscall on the egress path.
+            </div>
+          </div>
+        </div>
+
+        <!-- XDP program -->
+        <div class="code-pointer reveal reveal-delay-3">
+          <div class="code-pointer__tab">
+            <div class="code-pointer__tab-dot code-pointer__tab-dot--xdp"></div>
+            <span class="code-pointer__tab-filename">agave-xdp-prog.rs</span>
+            <span class="code-pointer__tab-line">#L18</span>
+          </div>
+          <div class="code-pointer__body">
+            <div class="code-pointer__icon code-pointer__icon--xdp">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+            </div>
+            <div class="code-pointer__desc">
+              <strong>XDP program.</strong>
+              <code>agave_xdp</code> is the eBPF entrypoint attached at the NIC driver level.
+              Parses headers, checks allowlists, returns DROP or REDIRECT.
+            </div>
+          </div>
+        </div>
+
+        <!-- AF_XDP setup -->
+        <div class="code-pointer reveal reveal-delay-4">
+          <div class="code-pointer__tab">
+            <div class="code-pointer__tab-dot code-pointer__tab-dot--xdp"></div>
+            <span class="code-pointer__tab-filename">xdp/socket.rs</span>
+            <span class="code-pointer__tab-line">#L45</span>
+          </div>
+          <div class="code-pointer__body">
+            <div class="code-pointer__icon code-pointer__icon--socket">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </div>
+            <div class="code-pointer__desc">
+              <strong>AF_XDP setup.</strong>
+              Socket, UMEM, and ring configuration. This is where the validator allocates
+              shared memory and binds to specific NIC queues for zero-copy reception.
+            </div>
+          </div>
+        </div>
+
+        <!-- AF_XDP egress -->
+        <div class="code-pointer reveal reveal-delay-5">
+          <div class="code-pointer__tab">
+            <div class="code-pointer__tab-dot code-pointer__tab-dot--xdp"></div>
+            <span class="code-pointer__tab-filename">quic_socket.rs</span>
+            <span class="code-pointer__tab-line">#L31</span>
+          </div>
+          <div class="code-pointer__body">
+            <div class="code-pointer__icon code-pointer__icon--quic">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            </div>
+            <div class="code-pointer__desc">
+              <strong>AF_XDP egress.</strong>
+              QUIC socket support for AF_XDP-backed sending. Bypasses the kernel on the
+              transmit path for transaction data flowing back to the network.
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================
+         SECTION 4: FIREDANCER
+         ============================ -->
+    <section class="section reveal" id="firedancer">
+      <div class="section__number">04</div>
+      <h2 class="section__heading">Firedancer: The Full Bypass Approach</h2>
+      <p>
+        While Agave uses selective kernel bypass, Jump Crypto's Firedancer takes the
+        opposite stance: bypass everything from the start. Same AF_XDP primitive,
+        very different architecture.
+      </p>
+
+      <div class="firedancer-section reveal">
+        <div class="firedancer-header">
+          <div class="firedancer-header__badge">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            Jump Crypto
+          </div>
+          <h3 class="firedancer-header__title">Firedancer <span>Validator</span></h3>
+        </div>
+        <div class="firedancer-body">
+          <div class="firedancer-stats">
+            <div class="firedancer-stat">
+              <div class="firedancer-stat__value">~20M</div>
+              <div class="firedancer-stat__label">pps / core</div>
+            </div>
+            <div class="firedancer-stat">
+              <div class="firedancer-stat__value">1.4M</div>
+              <div class="firedancer-stat__label">TPS demo</div>
+            </div>
+            <div class="firedancer-stat">
+              <div class="firedancer-stat__value">~20K</div>
+              <div class="firedancer-stat__label">kernel wakes/s</div>
+            </div>
+            <div class="firedancer-stat">
+              <div class="firedancer-stat__value">2025</div>
+              <div class="firedancer-stat__label">mainnet (hybrid)</div>
+            </div>
+          </div>
+
+          <div class="firedancer-features">
+            <div class="firedancer-feature">
+              <div class="firedancer-feature__bullet"></div>
+              <span>Uses <strong>AF_XDP for kernel bypass</strong>, not DPDK. The net tile owns NIC queues via AF_XDP, busy-polls continuously.</span>
+            </div>
+            <div class="firedancer-feature">
+              <div class="firedancer-feature__bullet"></div>
+              <span>Custom <code>fd_quic</code> implementation in C (not quinn/Rust) for performance. Every protocol layer is hand-tuned.</span>
+            </div>
+            <div class="firedancer-feature">
+              <div class="firedancer-feature__bullet"></div>
+              <span>Two XDP modes: <strong>drv</strong> (native, fastest) and <strong>skb</strong> (generic fallback for unsupported NICs).</span>
+            </div>
+            <div class="firedancer-feature">
+              <div class="firedancer-feature__bullet"></div>
+              <span><strong>RSS distributes traffic</strong> across multiple net tiles/CPU cores. Each tile is pinned to a core with its own AF_XDP socket.</span>
+            </div>
+            <div class="firedancer-feature">
+              <div class="firedancer-feature__bullet"></div>
+              <span>Frankendancer (Firedancer hybrid with Agave consensus) hit <strong>Solana mainnet in 2025</strong>.</span>
+            </div>
+          </div>
+
+          <div class="firedancer-contrast">
+            <div class="firedancer-contrast__card firedancer-contrast__card--agave">
+              <div class="firedancer-contrast__label">Agave</div>
+              <div class="firedancer-contrast__text">
+                <strong>Selective bypass.</strong> Kernel handles gossip, management, DNS.
+                AF_XDP only for the transaction hot path. Pragmatic: works with more hardware,
+                easier to debug with standard tools.
+              </div>
+            </div>
+            <div class="firedancer-contrast__card firedancer-contrast__card--fd">
+              <div class="firedancer-contrast__label">Firedancer</div>
+              <div class="firedancer-contrast__text">
+                <strong>Full bypass from day one.</strong> The net tile handles all traffic
+                through AF_XDP. Maximum throughput, minimum flexibility. Every packet
+                touches hand-written C, never the kernel stack.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================
+         SECTION 5: THE STORY ARC
+         ============================ -->
+    <section class="section reveal" id="story-arc">
+      <div class="section__number">05</div>
+      <h2 class="section__heading">The Story Arc</h2>
+      <p>
+        Seven parts, one narrative. The problem deepens across Parts 1-3, the tools
+        arrive in Parts 4-5, and the solution takes shape in Parts 6-7. Here is the
+        full arc at a glance.
+      </p>
+
+      <div class="series-arc reveal" id="seriesArc">
+        <div class="series-arc__title">Series: Linux Networking for Agave Validators</div>
+
+        <div class="series-arc__track">
+          <div class="series-arc__line" aria-hidden="true"></div>
+
+          <div class="series-arc-node series-arc-node--1" data-delay="0">
+            <div class="series-arc-node__dot">1</div>
+            <div class="series-arc-node__label">Why UDP</div>
+            <div class="series-arc-node__desc">Connectionless, low-overhead choice</div>
+          </div>
+
+          <div class="series-arc-node series-arc-node--2" data-delay="80">
+            <div class="series-arc-node__dot">2</div>
+            <div class="series-arc-node__label">Packet Journey</div>
+            <div class="series-arc-node__desc">15 steps of kernel overhead</div>
+          </div>
+
+          <div class="series-arc-node series-arc-node--3" data-delay="160">
+            <div class="series-arc-node__dot">3</div>
+            <div class="series-arc-node__label">Why It Breaks</div>
+            <div class="series-arc-node__desc">Consumes entire CPU cores</div>
+          </div>
+
+          <div class="series-arc-node series-arc-node--4" data-delay="240">
+            <div class="series-arc-node__dot">4</div>
+            <div class="series-arc-node__label">eBPF</div>
+            <div class="series-arc-node__desc">Safe programs inside the kernel</div>
+          </div>
+
+          <div class="series-arc-node series-arc-node--5" data-delay="320">
+            <div class="series-arc-node__dot">5</div>
+            <div class="series-arc-node__label">XDP</div>
+            <div class="series-arc-node__desc">Drop spam at the NIC driver</div>
+          </div>
+
+          <div class="series-arc-node series-arc-node--6" data-delay="400">
+            <div class="series-arc-node__dot">6</div>
+            <div class="series-arc-node__label">AF_XDP</div>
+            <div class="series-arc-node__desc">Zero-copy rings for good packets</div>
+          </div>
+
+          <div class="series-arc-node series-arc-node--7" data-delay="480">
+            <div class="series-arc-node__dot">7</div>
+            <div class="series-arc-node__label">Big Picture</div>
+            <div class="series-arc-node__desc">Layered defense, selective bypass</div>
+          </div>
+        </div>
+
+        <div class="series-arc__phases">
+          <div class="series-arc__phase series-arc__phase--problem">
+            <div class="series-arc__phase-label">The Problem</div>
+          </div>
+          <div class="series-arc__phase series-arc__phase--tools">
+            <div class="series-arc__phase-label">The Tools</div>
+          </div>
+          <div class="series-arc__phase series-arc__phase--solution">
+            <div class="series-arc__phase-label">The Solution</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="analogy reveal">
+        <div class="analogy__label">The Layered Defense</div>
+        <p>
+          <strong>DROP</strong> spam at the NIC. <strong>BYPASS</strong> the kernel for
+          hot traffic. <strong>PASS</strong> management traffic through the normal stack.
+          Three actions, three layers, one coherent strategy.
+        </p>
+      </div>
+    </section>
+
+    <!-- ============================
+         SECTION 6: KEY TAKEAWAYS
+         ============================ -->
+    <section class="section reveal" id="takeaways">
+      <div class="section__number">06</div>
+      <h2 class="section__heading">Key Takeaways</h2>
+
+      <div class="takeaways">
+        <div class="takeaway-card reveal">
+          <div class="takeaway-card__number">01</div>
+          <div class="takeaway-card__title">Filter early, bypass where possible</div>
+          <div class="takeaway-card__body">
+            The same principle as Solana's sigverify stage. <strong>Validate cheap properties
+            first, reject early</strong>, only invest heavy resources on packets that pass.
+            XDP DROP costs nanoseconds. A full kernel traversal costs microseconds.
+          </div>
+        </div>
+
+        <div class="takeaway-card reveal reveal-delay-1">
+          <div class="takeaway-card__number">02</div>
+          <div class="takeaway-card__title">The kernel is not the enemy</div>
+          <div class="takeaway-card__body">
+            The kernel path is general, compatible, and observable. You bypass it
+            <strong>where performance demands it</strong>, not everywhere. Agave's selective
+            bypass is easier to maintain and debug than a full bypass. Use the right tool
+            for each traffic class.
+          </div>
+        </div>
+
+        <div class="takeaway-card reveal reveal-delay-2">
+          <div class="takeaway-card__number">03</div>
+          <div class="takeaway-card__title">This pattern is universal</div>
+          <div class="takeaway-card__body">
+            Early hooks + kernel bypass + zero-copy is the pattern for <strong>all modern
+            high-performance I/O</strong>. io_uring does the same for storage. The same
+            principles apply to any system processing millions of operations per second.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================
+         PREV PART CTA (final, no "next")
+         ============================ -->
+    <div class="nav-cta reveal">
+      <a href="part6-af-xdp.html" class="nav-cta__card">
+        <span class="nav-cta__label">Previous: Part 6</span>
+        <span class="nav-cta__title">AF_XDP: Zero-Copy Rings</span>
+        <span class="nav-cta__link-row">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="19" y1="12" x2="5" y2="12"/>
+            <polyline points="12 19 5 12 12 5"/>
+          </svg>
+          Go back
+        </span>
+      </a>
+    </div>
+
+    <!-- ============================
+         SERIES COMPLETE
+         ============================ -->
+    <div class="series-complete reveal">
+      <div class="series-complete__line"></div>
+      <div class="series-complete__badge">
+        <div class="series-complete__dot" aria-hidden="true"></div>
+        <span class="series-complete__text">Series Complete</span>
+      </div>
+      <p class="series-complete__subtext">7 of 7 parts finished</p>
+    </div>
+
+    <!-- ============================
+         FOOTER
+         ============================ -->
+    <footer class="page-footer">
+      <p>
+        Series: Linux Networking for Agave Validators<br>
+        <a href="https://turbin3.com" target="_blank" rel="noopener">Turbin3</a> Q2 2026 Advanced SVM Cohort
+      </p>
+    </footer>
+
+  </div>
+</main>
+
+<script>
+(function() {
+  'use strict';
+
+  // ============================
+  // Reading Progress Bar
+  // ============================
+  var progressBar = document.getElementById('readingProgress');
+  var ticking = false;
+
+  function updateProgress() {
+    var scrollTop = window.scrollY;
+    var docHeight = document.documentElement.scrollHeight - window.innerHeight;
+    var progress = docHeight > 0 ? (scrollTop / docHeight) * 100 : 0;
+    progressBar.style.width = progress + '%';
+    ticking = false;
+  }
+
+  window.addEventListener('scroll', function() {
+    if (!ticking) {
+      requestAnimationFrame(updateProgress);
+      ticking = true;
+    }
+  }, { passive: true });
+
+  // ============================
+  // Scroll Reveal (Intersection Observer)
+  // ============================
+  var prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  if (!prefersReducedMotion) {
+    // Standard reveal elements
+    var revealElements = document.querySelectorAll('.reveal');
+    var observer = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, {
+      threshold: 0.1,
+      rootMargin: '0px 0px -60px 0px'
+    });
+
+    revealElements.forEach(function(el) {
+      observer.observe(el);
+    });
+
+    // Series arc node staggered reveal
+    var arcContainer = document.getElementById('seriesArc');
+    var arcNodes = arcContainer ? arcContainer.querySelectorAll('.series-arc-node') : [];
+
+    if (arcNodes.length > 0) {
+      var arcObserver = new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) {
+          if (entry.isIntersecting) {
+            arcNodes.forEach(function(node) {
+              var delay = parseInt(node.getAttribute('data-delay'), 10) || 0;
+              setTimeout(function() {
+                node.classList.add('visible');
+              }, delay);
+            });
+            arcObserver.unobserve(entry.target);
+          }
+        });
+      }, {
+        threshold: 0.2,
+        rootMargin: '0px 0px -40px 0px'
+      });
+
+      arcObserver.observe(arcContainer);
+    }
+  } else {
+    // Reduced motion: show everything immediately
+    document.querySelectorAll('.reveal').forEach(function(el) {
+      el.classList.add('visible');
+    });
+    document.querySelectorAll('.series-arc-node').forEach(function(el) {
+      el.classList.add('visible');
+    });
+  }
+
+})();
+</script>
+</body>
+</html>
