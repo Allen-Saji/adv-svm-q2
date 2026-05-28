@@ -28,6 +28,14 @@ A 7-part deep dive covering:
 
 Open any `.html` file in a browser -- they are self-contained with no build step.
 
+### block-building/
+
+**Block Building on Solana** -- how a Solana block actually gets constructed, where MEV infrastructure plugs into the validator pipeline, and where the protocol roadmap (Alpenglow, APE, Constellation) takes all of it.
+
+| Part | File | Topic |
+|------|------|-------|
+| 1 | `part1-architecture-walkthrough.html` | End-to-end Solana architecture, from user tx to rooted finality (77-step walkthrough with inline visuals) |
+
 ## Author
 
 Allen Saji ([@SajiBhai011](https://x.com/SajiBhai011)) -- [allensaji.dev](https://allensaji.dev)

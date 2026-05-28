@@ -1,0 +1,826 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Solana Architecture — End-to-End Walkthrough</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0c11;
+    --bg-elevated:#11141c;
+    --bg-soft:#161a24;
+    --border:#222837;
+    --border-soft:#1b2030;
+    --text:#e6e8ee;
+    --text-dim:#9ba3b4;
+    --text-faint:#6a7383;
+    --accent:#9945ff;
+    --accent-2:#14f195;
+    --accent-warm:#ffb454;
+    --accent-red:#f7657c;
+    --accent-blue:#56b6ff;
+    --code-bg:#0d1018;
+    --pure:radial-gradient(120% 80% at 50% 0%,rgba(20,241,149,.06),transparent 60%);
+    --maxw:880px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:'Inter',system-ui,-apple-system,sans-serif;
+    background:var(--bg); color:var(--text);
+    font-size:16px; line-height:1.65;
+    -webkit-font-smoothing:antialiased;
+  }
+  body::before{content:"";position:fixed;inset:0;pointer-events:none;background:var(--pure);z-index:0}
+  .layout{display:grid;grid-template-columns:minmax(0,1fr) 240px;gap:64px;max-width:1240px;margin:0 auto;padding:48px 32px 120px;position:relative;z-index:1}
+  @media (max-width:960px){.layout{grid-template-columns:1fr;gap:32px;padding:32px 20px 80px}aside{display:none}}
+  main{max-width:var(--maxw);min-width:0}
+
+  .eyebrow{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--text-faint);margin-bottom:24px}
+  .eyebrow span{color:var(--accent-2)}
+  h1{font-size:48px;line-height:1.08;font-weight:600;letter-spacing:-.025em;margin:0 0 20px;background:linear-gradient(180deg,#fff,#cfd4e0);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{font-size:19px;color:var(--text-dim);line-height:1.6;max-width:680px;margin:0 0 40px}
+  .meta-row{display:flex;gap:16px;flex-wrap:wrap;padding:14px 18px;border:1px solid var(--border);background:var(--bg-elevated);border-radius:10px;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text-dim);margin-bottom:48px}
+  .meta-row b{color:var(--text);font-weight:500}
+  .meta-row span+span{padding-left:16px;border-left:1px solid var(--border)}
+
+  h2{font-size:28px;line-height:1.2;font-weight:600;letter-spacing:-.02em;margin:72px 0 8px;color:#fff;scroll-margin-top:24px}
+  h2 .num{font-family:'JetBrains Mono',monospace;color:var(--accent-2);font-size:13px;font-weight:500;margin-right:14px;vertical-align:middle;letter-spacing:.05em}
+  h2 + .sub{color:var(--text-dim);font-size:15px;margin:0 0 24px;max-width:640px}
+  h3{font-size:18px;font-weight:600;margin:32px 0 10px;color:#fff;letter-spacing:-.01em}
+  h4{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--accent-2);margin:24px 0 10px;font-family:'JetBrains Mono',monospace}
+  p{margin:0 0 14px}
+  a{color:var(--accent-blue);text-decoration:none;border-bottom:1px solid rgba(86,182,255,.3)}
+  strong{color:#fff;font-weight:600}
+  em{color:var(--text);font-style:italic}
+
+  code{font-family:'JetBrains Mono',monospace;font-size:.85em;background:var(--code-bg);border:1px solid var(--border-soft);color:#d8dde8;padding:1px 6px;border-radius:4px}
+  pre{background:var(--code-bg);border:1px solid var(--border);border-radius:10px;padding:14px 16px;overflow-x:auto;font-size:12px;line-height:1.55;margin:14px 0}
+  pre code{background:none;border:0;padding:0;color:#d8dde8}
+
+  .callout{margin:20px 0;border:1px solid var(--border);border-left:3px solid var(--accent-2);background:var(--bg-elevated);border-radius:6px;padding:16px 20px}
+  .callout .label{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent-2);font-weight:600;margin-bottom:6px;display:block}
+  .callout p:last-child{margin-bottom:0}
+
+  .steps{margin:16px 0;padding:0;list-style:none;counter-reset:none}
+  .steps li{
+    position:relative;
+    padding:10px 16px 10px 56px;
+    border-left:1px solid var(--border-soft);
+    margin-left:14px;
+    color:var(--text);
+  }
+  .steps li::before{
+    content:attr(data-n);
+    position:absolute;left:-15px;top:9px;
+    width:30px;height:30px;border-radius:50%;
+    background:var(--bg-elevated);border:1px solid var(--border);
+    color:var(--accent-2);
+    font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .steps li b{color:#fff;font-weight:600}
+
+  .table-wrap{margin:20px 0;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--border-soft);vertical-align:top}
+  th{background:var(--bg-elevated);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim)}
+  tr:last-child td{border-bottom:0}
+  td code{font-size:11px}
+
+  .diagram{background:var(--bg-elevated);border:1px solid var(--border);border-radius:14px;padding:24px;margin:24px 0;overflow-x:auto}
+  .diagram svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .diagram .caption{margin-top:14px;font-size:12px;color:var(--text-dim);text-align:center;line-height:1.5}
+
+  aside{position:sticky;top:24px;align-self:start;max-height:calc(100vh - 48px);overflow-y:auto}
+  .toc-title{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--text-faint);margin-bottom:14px}
+  .toc{list-style:none;padding:0;margin:0;font-size:13px;line-height:1.5}
+  .toc li{margin:0;padding:5px 0;border-left:1px solid var(--border-soft)}
+  .toc a{display:block;padding-left:14px;color:var(--text-dim);border:0}
+  .toc a:hover{color:var(--accent-2)}
+  .toc .num{font-family:'JetBrains Mono',monospace;color:var(--text-faint);margin-right:6px;font-size:11px}
+
+  svg text{font-family:'Inter',sans-serif;fill:var(--text)}
+  .svg-mono{font-family:'JetBrains Mono',monospace !important;font-size:11px}
+  .svg-dim{fill:var(--text-dim)}
+  .svg-faint{fill:var(--text-faint)}
+
+  .pill{display:inline-block;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.08em;text-transform:uppercase;padding:2px 8px;border-radius:3px;margin-left:8px;vertical-align:middle;background:rgba(20,241,149,.12);color:var(--accent-2);border:1px solid rgba(20,241,149,.3)}
+
+  blockquote{margin:24px 0;padding:0 0 0 24px;border-left:3px solid var(--accent-2);font-size:17px;line-height:1.5;color:#fff;font-style:italic}
+
+  hr{border:0;height:1px;background:linear-gradient(90deg,transparent,var(--border),transparent);margin:48px 0}
+  footer{margin-top:80px;padding-top:32px;border-top:1px solid var(--border);font-size:13px;color:var(--text-faint)}
+</style>
+</head>
+<body>
+
+<div class="layout">
+<main>
+
+  <div class="eyebrow"><span>●</span> Architecture walkthrough · companion to harmonic-lecture-prep</div>
+  <h1>Solana Architecture: End-to-End</h1>
+  <p class="lede">Every component, in the order a transaction touches them. Read once linearly to absorb the sequence; come back to each section as reference. The lecture's content will live somewhere on this map — your job is to spot where.</p>
+
+  <div class="meta-row">
+    <span><b>Slot:</b> 400 ms</span>
+    <span><b>Validators:</b> ~2,000</span>
+    <span><b>State:</b> ~1.5 TB</span>
+    <span><b>Read time:</b> ~20 min</span>
+  </div>
+
+  <!-- ====== 10,000ft map ====== -->
+  <h2 id="map"><span class="num">00</span>The 10,000-ft Map</h2>
+  <p class="sub">Every box below appears later as its own section. Hold this picture in your head while reading.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 780 480" width="780">
+      <defs>
+        <marker id="ar" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#56b6ff"/></marker>
+        <marker id="ag" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#14f195"/></marker>
+      </defs>
+
+      <!-- Layer: users -->
+      <rect x="260" y="20" width="260" height="50" rx="10" fill="#161a24" stroke="#56b6ff" stroke-opacity=".5"/>
+      <text x="390" y="44" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">Users / Wallets</text>
+      <text x="390" y="60" text-anchor="middle" font-size="10" class="svg-dim">sign tx · pick recent blockhash</text>
+
+      <line x1="390" y1="70" x2="390" y2="95" stroke="#56b6ff" stroke-width="1.5" marker-end="url(#ar)"/>
+
+      <!-- Layer: RPC -->
+      <rect x="260" y="100" width="260" height="50" rx="10" fill="#161a24" stroke="#56b6ff" stroke-opacity=".5"/>
+      <text x="390" y="124" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">RPC nodes</text>
+      <text x="390" y="140" text-anchor="middle" font-size="10" class="svg-dim">Helius / QuickNode / Triton</text>
+
+      <line x1="390" y1="150" x2="390" y2="175" stroke="#56b6ff" stroke-width="1.5" marker-end="url(#ar)"/>
+      <text x="400" y="166" font-size="10" class="svg-dim">Gulf Stream</text>
+
+      <!-- Layer: leader -->
+      <rect x="80" y="180" width="620" height="160" rx="12" fill="#1c1530" stroke="#9945ff" stroke-opacity=".7" stroke-width="1.5"/>
+      <text x="390" y="206" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">LEADER VALIDATOR (current 4-slot window)</text>
+
+      <!-- TPU stages -->
+      <rect x="100" y="220" width="90" height="50" rx="6" fill="#0d1018" stroke="#56b6ff" stroke-opacity=".4"/>
+      <text x="145" y="244" text-anchor="middle" font-size="11" fill="#fff">Fetch</text>
+      <text x="145" y="258" text-anchor="middle" font-size="9" class="svg-dim">QUIC · SWQoS</text>
+
+      <rect x="200" y="220" width="90" height="50" rx="6" fill="#0d1018" stroke="#56b6ff" stroke-opacity=".4"/>
+      <text x="245" y="244" text-anchor="middle" font-size="11" fill="#fff">SigVerify</text>
+      <text x="245" y="258" text-anchor="middle" font-size="9" class="svg-dim">Ed25519 · dedup</text>
+
+      <rect x="300" y="220" width="120" height="50" rx="6" fill="#1c1530" stroke="#9945ff" stroke-opacity=".7"/>
+      <text x="360" y="244" text-anchor="middle" font-size="11" fill="#fff">Banking</text>
+      <text x="360" y="258" text-anchor="middle" font-size="9" fill="#9945ff">★ scheduler + SVM</text>
+
+      <rect x="430" y="220" width="90" height="50" rx="6" fill="#0d1018" stroke="#56b6ff" stroke-opacity=".4"/>
+      <text x="475" y="244" text-anchor="middle" font-size="11" fill="#fff">PoH</text>
+      <text x="475" y="258" text-anchor="middle" font-size="9" class="svg-dim">SHA-256 chain</text>
+
+      <rect x="530" y="220" width="160" height="50" rx="6" fill="#0d1018" stroke="#14f195" stroke-opacity=".5"/>
+      <text x="610" y="244" text-anchor="middle" font-size="11" fill="#fff">Broadcast</text>
+      <text x="610" y="258" text-anchor="middle" font-size="9" class="svg-dim">shred · Reed-Solomon FEC</text>
+
+      <!-- arrows TPU -->
+      <line x1="190" y1="245" x2="200" y2="245" stroke="#56b6ff" stroke-width="1.2"/>
+      <line x1="290" y1="245" x2="300" y2="245" stroke="#56b6ff" stroke-width="1.2"/>
+      <line x1="420" y1="245" x2="430" y2="245" stroke="#56b6ff" stroke-width="1.2"/>
+      <line x1="520" y1="245" x2="530" y2="245" stroke="#56b6ff" stroke-width="1.2"/>
+
+      <!-- runtime + state -->
+      <rect x="280" y="285" width="100" height="40" rx="6" fill="#0d1018" stroke="#9945ff" stroke-opacity=".4"/>
+      <text x="330" y="305" text-anchor="middle" font-size="11" fill="#fff">SVM runtime</text>
+      <text x="330" y="318" text-anchor="middle" font-size="9" class="svg-dim">BPF · 60M CU</text>
+
+      <rect x="395" y="285" width="100" height="40" rx="6" fill="#0d1018" stroke="#9945ff" stroke-opacity=".4"/>
+      <text x="445" y="305" text-anchor="middle" font-size="11" fill="#fff">AccountsDB</text>
+      <text x="445" y="318" text-anchor="middle" font-size="9" class="svg-dim">AppendVec ~1.5TB</text>
+
+      <line x1="360" y1="270" x2="345" y2="285" stroke="#9945ff" stroke-opacity=".4"/>
+      <line x1="380" y1="305" x2="395" y2="305" stroke="#9945ff" stroke-opacity=".4"/>
+
+      <!-- Turbine -->
+      <line x1="610" y1="270" x2="610" y2="365" stroke="#14f195" stroke-width="1.5" marker-end="url(#ag)"/>
+      <text x="620" y="320" font-size="10" class="svg-dim">Turbine</text>
+      <text x="620" y="334" font-size="10" class="svg-dim">tree fanout 200</text>
+
+      <!-- Other validators -->
+      <rect x="80" y="370" width="620" height="60" rx="12" fill="#161a24" stroke="#14f195" stroke-opacity=".5"/>
+      <text x="390" y="394" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">~2000 OTHER VALIDATORS — TVU + ReplayStage</text>
+      <text x="390" y="412" text-anchor="middle" font-size="10" class="svg-dim">verify · replay · vote · gossip</text>
+
+      <!-- TowerBFT -->
+      <line x1="390" y1="430" x2="390" y2="450" stroke="#9945ff" stroke-width="1.5"/>
+      <rect x="200" y="448" width="380" height="22" rx="6" fill="#1c1530" stroke="#9945ff" stroke-opacity=".5"/>
+      <text x="390" y="464" text-anchor="middle" font-size="11" fill="#fff">TowerBFT → optimistic confirm (>2/3) → rooted (32 votes)</text>
+
+      <!-- side: gossip continuous -->
+      <text x="20" y="200" font-size="10" class="svg-faint" letter-spacing="1.5">CONTINUOUS</text>
+      <text x="20" y="216" font-size="11" class="svg-dim">▸ gossip</text>
+      <text x="20" y="232" font-size="11" class="svg-dim">▸ repair</text>
+      <text x="20" y="248" font-size="11" class="svg-dim">▸ snapshots</text>
+      <text x="20" y="264" font-size="11" class="svg-dim">▸ epoch clock</text>
+      <text x="20" y="280" font-size="11" class="svg-dim">▸ stake activation</text>
+    </svg>
+    <div class="caption">Solana in one frame. Everything below this point is a zoom-in on one of these boxes.</div>
+  </div>
+
+  <hr>
+
+  <!-- ====== Part 1 ====== -->
+  <h2 id="p1"><span class="num">01</span>Client Side: Tx Construction</h2>
+  <p class="sub">Before the network sees anything, a lot of structure is already baked into the transaction.</p>
+
+  <ol class="steps">
+    <li data-n="1"><b>User picks an action</b> in a frontend. Frontend assembles a tx: list of instructions, each = program + accounts + data.</li>
+    <li data-n="2"><b>Fetch a recent blockhash</b> from any RPC. Expires after ~150 slots. Doubles as replay protection + soft state binding.</li>
+    <li data-n="3"><b>Serialize</b> instructions, accounts (with writable + signer flags), blockhash, fee payer.</li>
+    <li data-n="4"><b>Sign</b> with Ed25519. Whole tx must fit in <code>1232 bytes</code> (single MTU after IPv6 overhead).</li>
+    <li data-n="5"><b>Send to an RPC node</b> via <code>sendTransaction</code> JSON-RPC. The tx leaves the user's machine.</li>
+  </ol>
+
+  <div class="callout">
+    <span class="label">★ Insight</span>
+    <p>The 1232-byte ceiling is exactly why <strong>Address Lookup Tables (ALTs)</strong> exist — they let you reference up to 256 accounts with 1-byte indices instead of 32-byte pubkeys. Every modern Solana protocol uses ALTs because the size budget is the real-world constraint, not compute.</p>
+  </div>
+
+  <hr>
+
+  <!-- ====== Part 2 ====== -->
+  <h2 id="p2"><span class="num">02</span>Gulf Stream: Forwarding to the Leader</h2>
+  <p class="sub">Solana skips the mempool. Txs go straight to whoever's holding the mic.</p>
+
+  <ol class="steps">
+    <li data-n="6"><b>RPC looks up the leader schedule</b> — every node knows current + upcoming leaders (computed once per epoch from previous epoch's stake).</li>
+    <li data-n="7"><b>Forward via QUIC to current leader.</b> Gulf Stream = speculative forwarding before the leader's slot even begins.</li>
+    <li data-n="8"><b>Near slot boundary: forward to next leader too.</b> Hides handoff latency — next leader buffers incoming txs while predecessor finishes.</li>
+    <li data-n="9"><b>SWQoS gates ingress.</b> 80% of TPU bandwidth reserved for staked-node connections. Unstaked RPCs frequently lose connection slots under load.</li>
+  </ol>
+
+  <div class="diagram">
+    <svg viewBox="0 0 760 180" width="760">
+      <rect x="20" y="40" width="100" height="40" rx="6" fill="#161a24" stroke="#56b6ff" stroke-opacity=".5"/>
+      <text x="70" y="64" text-anchor="middle" font-size="12" fill="#fff">RPC</text>
+
+      <line x1="120" y1="60" x2="220" y2="60" stroke="#56b6ff" stroke-width="1.5" stroke-dasharray="4,3"/>
+      <text x="170" y="50" text-anchor="middle" font-size="10" class="svg-dim">Gulf Stream</text>
+
+      <rect x="220" y="20" width="120" height="40" rx="6" fill="#1c1530" stroke="#9945ff" stroke-opacity=".7"/>
+      <text x="280" y="44" text-anchor="middle" font-size="12" fill="#fff">Leader (slot N)</text>
+
+      <rect x="220" y="80" width="120" height="40" rx="6" fill="#161a24" stroke="#9945ff" stroke-opacity=".3" stroke-dasharray="3,3"/>
+      <text x="280" y="104" text-anchor="middle" font-size="12" class="svg-dim">Leader (slot N+1)</text>
+
+      <text x="370" y="44" font-size="11" class="svg-dim">primary recipient</text>
+      <text x="370" y="104" font-size="11" class="svg-dim">speculative forward (last 1-2 ticks)</text>
+
+      <!-- timeline -->
+      <line x1="450" y1="145" x2="740" y2="145" stroke="#222837" stroke-width="2"/>
+      <circle cx="460" cy="145" r="4" fill="#9945ff"/>
+      <circle cx="580" cy="145" r="4" fill="#9945ff"/>
+      <circle cx="700" cy="145" r="4" fill="#9945ff"/>
+      <text x="460" y="166" text-anchor="middle" font-size="10" class="svg-dim">slot N</text>
+      <text x="580" y="166" text-anchor="middle" font-size="10" class="svg-dim">slot N+4</text>
+      <text x="700" y="166" text-anchor="middle" font-size="10" class="svg-dim">slot N+8</text>
+      <text x="595" y="130" text-anchor="middle" font-size="10" fill="#9945ff">leader rotates every 4 slots</text>
+    </svg>
+    <div class="caption">No mempool. Direct forwarding to current + next leader. The 4-slot window amortizes handoff cost.</div>
+  </div>
+
+  <hr>
+
+  <!-- ====== Part 3 ====== -->
+  <h2 id="p3"><span class="num">03</span>Inside the Leader: The TPU Pipeline</h2>
+  <p class="sub">This is where every Solana block-building company fights for influence.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 780 200" width="780">
+      <defs>
+        <marker id="arx" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#56b6ff"/></marker>
+      </defs>
+
+      <text x="20" y="20" font-size="11" class="svg-faint" letter-spacing="2">QUIC INGRESS</text>
+      <rect x="20" y="30" width="90" height="60" rx="6" fill="#161a24" stroke="#222837"/>
+      <text x="65" y="54" text-anchor="middle" font-size="11" fill="#fff">tpu</text>
+      <text x="65" y="70" text-anchor="middle" font-size="9" class="svg-dim">tpu_vote</text>
+      <text x="65" y="84" text-anchor="middle" font-size="9" class="svg-dim">tpu_forwards</text>
+
+      <line x1="112" y1="60" x2="142" y2="60" stroke="#56b6ff" stroke-width="1.5" marker-end="url(#arx)"/>
+      <rect x="145" y="30" width="100" height="60" rx="6" fill="#161a24" stroke="#56b6ff" stroke-opacity=".4"/>
+      <text x="195" y="56" text-anchor="middle" font-size="12" fill="#fff">Fetch</text>
+      <text x="195" y="74" text-anchor="middle" font-size="9" class="svg-dim">100k buf · SWQoS</text>
+
+      <line x1="247" y1="60" x2="277" y2="60" stroke="#56b6ff" stroke-width="1.5" marker-end="url(#arx)"/>
+      <rect x="280" y="30" width="100" height="60" rx="6" fill="#161a24" stroke="#56b6ff" stroke-opacity=".4"/>
+      <text x="330" y="56" text-anchor="middle" font-size="12" fill="#fff">SigVerify</text>
+      <text x="330" y="74" text-anchor="middle" font-size="9" class="svg-dim">Ed25519 + dedup</text>
+
+      <line x1="382" y1="60" x2="412" y2="60" stroke="#9945ff" stroke-width="2" marker-end="url(#arx)"/>
+      <rect x="415" y="20" width="140" height="80" rx="8" fill="#1c1530" stroke="#9945ff" stroke-opacity=".8" stroke-width="1.5"/>
+      <text x="485" y="46" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">Banking</text>
+      <text x="485" y="64" text-anchor="middle" font-size="10" fill="#9945ff">★ scheduler</text>
+      <text x="485" y="80" text-anchor="middle" font-size="10" class="svg-dim">4 work + 2 vote thr</text>
+      <text x="485" y="94" text-anchor="middle" font-size="10" class="svg-dim">→ SVM execution</text>
+
+      <line x1="557" y1="60" x2="587" y2="60" stroke="#56b6ff" stroke-width="1.5" marker-end="url(#arx)"/>
+      <rect x="590" y="30" width="80" height="60" rx="6" fill="#161a24" stroke="#56b6ff" stroke-opacity=".4"/>
+      <text x="630" y="56" text-anchor="middle" font-size="12" fill="#fff">PoH</text>
+      <text x="630" y="74" text-anchor="middle" font-size="9" class="svg-dim">64 ticks/slot</text>
+
+      <line x1="672" y1="60" x2="702" y2="60" stroke="#56b6ff" stroke-width="1.5" marker-end="url(#arx)"/>
+      <rect x="700" y="30" width="60" height="60" rx="6" fill="#161a24" stroke="#14f195" stroke-opacity=".5"/>
+      <text x="730" y="56" text-anchor="middle" font-size="11" fill="#fff">Bcast</text>
+      <text x="730" y="74" text-anchor="middle" font-size="9" class="svg-dim">→Turbine</text>
+
+      <!-- bottom -->
+      <text x="20" y="130" font-size="11" class="svg-faint" letter-spacing="2">UNDERNEATH BANKING</text>
+      <rect x="20" y="140" width="200" height="40" rx="6" fill="#161a24" stroke="#9945ff" stroke-opacity=".4"/>
+      <text x="120" y="164" text-anchor="middle" font-size="12" fill="#fff">SVM runtime (BPF)</text>
+
+      <rect x="240" y="140" width="200" height="40" rx="6" fill="#161a24" stroke="#9945ff" stroke-opacity=".4"/>
+      <text x="340" y="164" text-anchor="middle" font-size="12" fill="#fff">AccountsDB</text>
+
+      <rect x="460" y="140" width="300" height="40" rx="6" fill="#0d1018" stroke="#ffb454" stroke-opacity=".5"/>
+      <text x="610" y="164" text-anchor="middle" font-size="11" fill="#ffb454">↑ overlays: Jito BundleStage · Harmonic engine</text>
+    </svg>
+    <div class="caption">5 stages. Each is its own thread (Agave) or tile (Firedancer). Banking does the actual work; everything else is plumbing.</div>
+  </div>
+
+  <h3>Fetch + SigVerify</h3>
+  <ol class="steps">
+    <li data-n="10"><b>3 QUIC sockets:</b> <code>tpu</code> (user) · <code>tpu_vote</code> (votes) · <code>tpu_forwards</code> (overflow).</li>
+    <li data-n="11"><b>100k packet buffer</b> total. SWQoS enforced at the connection layer.</li>
+    <li data-n="12"><b>Signatures verified</b> — Ed25519 SIMD-parallel. Firedancer can FPGA-accelerate to 8M sigs/sec.</li>
+    <li data-n="13"><b>Dedup</b> vs the recent blockhash window kills replays.</li>
+    <li data-n="14"><b>Failed-sig txs get a discard flag</b> — pipeline keeps moving; downstream stages skip them.</li>
+  </ol>
+
+  <h3>Banking Stage (block building lives here)</h3>
+  <ol class="steps">
+    <li data-n="15"><b>Central scheduler thread</b> pulls high-priority txs into a look-ahead window. (Default since Agave 2.3.)</li>
+    <li data-n="16"><b>Builds a prio-graph</b> — edges connect each tx to its next-highest-priority conflict per writable account.</li>
+    <li data-n="17"><b>Per tx:</b> check live lock map → if conflict, park behind a dep edge → else dispatch to one of 4 worker threads → mark accounts locked.</li>
+    <li data-n="18"><b>Worker executes via SVM</b> — load accounts → walk instructions → CPI as needed → track CU → commit atomic.</li>
+    <li data-n="19"><b>On done: release locks</b>, prio-graph re-evaluates downstream waiters.</li>
+  </ol>
+
+  <h3>PoH + Broadcast</h3>
+  <ol class="steps">
+    <li data-n="20"><b>Successful tx hashes → PohRecorder.</b></li>
+    <li data-n="21"><b>Mixed into the SHA-256 chain:</b> <code>hash[n+1] = SHA256(hash[n] || tx_hash)</code>.</li>
+    <li data-n="22"><b>64 ticks per slot</b>, every ~6.25ms. PoH doesn't wait — late txs miss the block.</li>
+    <li data-n="23"><b>Entries = hash + conflict-free txs</b>, signed by the leader.</li>
+    <li data-n="24"><b>Packed into ~1200-byte shreds.</b> 32 data + 32 coding = any 32 reconstruct.</li>
+    <li data-n="25"><b>Merkle-chained, leader-signed.</b> First shred's signature anchors the whole block.</li>
+    <li data-n="26"><b>Handed to Turbine for propagation.</b></li>
+  </ol>
+
+  <div class="callout">
+    <span class="label">★ Insight</span>
+    <p>The PoH thread <em>decides when the slot ends</em>. Banking does its best to fill before the 64th tick. If your tx misses the leader's 1.6-second window, it's gone — Solana has no carry-over. Resubmit. This is the structural opposite of Ethereum's persistent mempool.</p>
+  </div>
+
+  <hr>
+
+  <!-- ====== Part 4 ====== -->
+  <h2 id="p4"><span class="num">04</span>Turbine: Block Propagation</h2>
+  <p class="sub">How shreds reach every other validator in ~100-200ms.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 760 240" width="760">
+      <!-- root -->
+      <rect x="335" y="20" width="90" height="34" rx="6" fill="#1c1530" stroke="#9945ff" stroke-opacity=".8"/>
+      <text x="380" y="42" text-anchor="middle" font-size="12" fill="#fff">Leader</text>
+
+      <!-- layer 1: 8 nodes representing 200 -->
+      <g>
+        <line x1="380" y1="54" x2="70" y2="100"   stroke="#14f195" stroke-opacity=".5"/>
+        <line x1="380" y1="54" x2="160" y2="100"  stroke="#14f195" stroke-opacity=".5"/>
+        <line x1="380" y1="54" x2="250" y2="100"  stroke="#14f195" stroke-opacity=".5"/>
+        <line x1="380" y1="54" x2="340" y2="100"  stroke="#14f195" stroke-opacity=".5"/>
+        <line x1="380" y1="54" x2="430" y2="100"  stroke="#14f195" stroke-opacity=".5"/>
+        <line x1="380" y1="54" x2="520" y2="100"  stroke="#14f195" stroke-opacity=".5"/>
+        <line x1="380" y1="54" x2="610" y2="100"  stroke="#14f195" stroke-opacity=".5"/>
+        <line x1="380" y1="54" x2="700" y2="100"  stroke="#14f195" stroke-opacity=".5"/>
+      </g>
+      <g>
+        <rect x="40"  y="100" width="60" height="26" rx="4" fill="#161a24" stroke="#14f195" stroke-opacity=".5"/>
+        <rect x="130" y="100" width="60" height="26" rx="4" fill="#161a24" stroke="#14f195" stroke-opacity=".5"/>
+        <rect x="220" y="100" width="60" height="26" rx="4" fill="#161a24" stroke="#14f195" stroke-opacity=".5"/>
+        <rect x="310" y="100" width="60" height="26" rx="4" fill="#161a24" stroke="#14f195" stroke-opacity=".5"/>
+        <rect x="400" y="100" width="60" height="26" rx="4" fill="#161a24" stroke="#14f195" stroke-opacity=".5"/>
+        <rect x="490" y="100" width="60" height="26" rx="4" fill="#161a24" stroke="#14f195" stroke-opacity=".5"/>
+        <rect x="580" y="100" width="60" height="26" rx="4" fill="#161a24" stroke="#14f195" stroke-opacity=".5"/>
+        <rect x="670" y="100" width="60" height="26" rx="4" fill="#161a24" stroke="#14f195" stroke-opacity=".5"/>
+      </g>
+      <text x="380" y="86" text-anchor="middle" font-size="10" class="svg-dim">layer 1 · ~200 nodes (fanout 200)</text>
+
+      <!-- layer 2: dense thin lines from each -->
+      <g stroke="#14f195" stroke-opacity=".25" stroke-width=".8">
+        <line x1="70"  y1="126" x2="40" y2="170"/><line x1="70"  y1="126" x2="60" y2="170"/><line x1="70"  y1="126" x2="80" y2="170"/><line x1="70"  y1="126" x2="100" y2="170"/>
+        <line x1="160" y1="126" x2="130" y2="170"/><line x1="160" y1="126" x2="150" y2="170"/><line x1="160" y1="126" x2="170" y2="170"/><line x1="160" y1="126" x2="190" y2="170"/>
+        <line x1="250" y1="126" x2="220" y2="170"/><line x1="250" y1="126" x2="240" y2="170"/><line x1="250" y1="126" x2="260" y2="170"/><line x1="250" y1="126" x2="280" y2="170"/>
+        <line x1="340" y1="126" x2="310" y2="170"/><line x1="340" y1="126" x2="330" y2="170"/><line x1="340" y1="126" x2="350" y2="170"/><line x1="340" y1="126" x2="370" y2="170"/>
+        <line x1="430" y1="126" x2="400" y2="170"/><line x1="430" y1="126" x2="420" y2="170"/><line x1="430" y1="126" x2="440" y2="170"/><line x1="430" y1="126" x2="460" y2="170"/>
+        <line x1="520" y1="126" x2="490" y2="170"/><line x1="520" y1="126" x2="510" y2="170"/><line x1="520" y1="126" x2="530" y2="170"/><line x1="520" y1="126" x2="550" y2="170"/>
+        <line x1="610" y1="126" x2="580" y2="170"/><line x1="610" y1="126" x2="600" y2="170"/><line x1="610" y1="126" x2="620" y2="170"/><line x1="610" y1="126" x2="640" y2="170"/>
+        <line x1="700" y1="126" x2="670" y2="170"/><line x1="700" y1="126" x2="690" y2="170"/><line x1="700" y1="126" x2="710" y2="170"/><line x1="700" y1="126" x2="730" y2="170"/>
+      </g>
+      <g fill="#0d1018" stroke="#14f195" stroke-opacity=".4">
+        <circle cx="40"  cy="178" r="5"/><circle cx="60"  cy="178" r="5"/><circle cx="80"  cy="178" r="5"/><circle cx="100" cy="178" r="5"/>
+        <circle cx="130" cy="178" r="5"/><circle cx="150" cy="178" r="5"/><circle cx="170" cy="178" r="5"/><circle cx="190" cy="178" r="5"/>
+        <circle cx="220" cy="178" r="5"/><circle cx="240" cy="178" r="5"/><circle cx="260" cy="178" r="5"/><circle cx="280" cy="178" r="5"/>
+        <circle cx="310" cy="178" r="5"/><circle cx="330" cy="178" r="5"/><circle cx="350" cy="178" r="5"/><circle cx="370" cy="178" r="5"/>
+        <circle cx="400" cy="178" r="5"/><circle cx="420" cy="178" r="5"/><circle cx="440" cy="178" r="5"/><circle cx="460" cy="178" r="5"/>
+        <circle cx="490" cy="178" r="5"/><circle cx="510" cy="178" r="5"/><circle cx="530" cy="178" r="5"/><circle cx="550" cy="178" r="5"/>
+        <circle cx="580" cy="178" r="5"/><circle cx="600" cy="178" r="5"/><circle cx="620" cy="178" r="5"/><circle cx="640" cy="178" r="5"/>
+        <circle cx="670" cy="178" r="5"/><circle cx="690" cy="178" r="5"/><circle cx="710" cy="178" r="5"/><circle cx="730" cy="178" r="5"/>
+      </g>
+      <text x="380" y="200" text-anchor="middle" font-size="10" class="svg-dim">layer 2 · ~all validators reached in 2-3 hops · 100-200ms end-to-end</text>
+
+      <text x="20" y="230" font-size="11" class="svg-faint">Stake-weighted: higher-stake nodes sit closer to root. Shred-deterministic seed shapes tree per shred.</text>
+    </svg>
+    <div class="caption">Turbine. Fanout-200 multi-hop tree. ShredStream (Jito) skips this for whitelisted searchers — direct shred delivery from the leader.</div>
+  </div>
+
+  <ol class="steps">
+    <li data-n="27"><b>Stake-weighted shred-deterministic tree.</b> Per-shred pseudorandom seed shapes the tree.</li>
+    <li data-n="28"><b>Fanout ~200 per node.</b> Higher stake → closer to root.</li>
+    <li data-n="29"><b>2-3 hops to full cluster.</b> 100-200ms typical; Agave 3.1 shipped 200× faster Turbine via XDP.</li>
+    <li data-n="30"><b>Jito ShredStream</b> bypasses the tree for whitelisted UDP subscribers — saves hundreds of ms.</li>
+  </ol>
+
+  <hr>
+
+  <!-- ====== Part 5 ====== -->
+  <h2 id="p5"><span class="num">05</span>Every Other Validator: The TVU</h2>
+  <p class="sub">~99.97% of the time you're not the leader. You're verifying their work.</p>
+
+  <ol class="steps">
+    <li data-n="31"><b>Shred Fetch</b> receives shreds from Turbine.</li>
+    <li data-n="32"><b>Shred Verify</b> checks Merkle root, leader signature, FEC reconstruction.</li>
+    <li data-n="33"><b>Repair Protocol</b> kicks in for gaps — gossip request: "missing shreds 47-52 of slot N." Peers respond.</li>
+    <li data-n="34"><b>Block assembly</b> reconstructs entries from shreds.</li>
+    <li data-n="35"><b>ReplayStage re-executes every tx</b> against local state in PoH order. This is what makes Solana deterministic — every honest node arrives at the same state.</li>
+    <li data-n="36"><b>Bank fork updated</b> for the parent slot's bank.</li>
+  </ol>
+
+  <div class="callout">
+    <span class="label">★ Insight</span>
+    <p>Every non-leader re-executes <em>every transaction</em>. This is one of Solana's biggest CPU costs and exactly what APE removes — under APE the block is a pure ordering commitment, not an execution receipt, so consensus stops requiring redundant re-execution. Huge validator-cost win whenever it lands.</p>
+  </div>
+
+  <hr>
+
+  <!-- ====== Part 6 ====== -->
+  <h2 id="p6"><span class="num">06</span>Voting &amp; Consensus (TowerBFT)</h2>
+  <p class="sub">How a block goes from "shipped" to "irreversible."</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 760 240" width="760">
+      <text x="20" y="22" font-size="11" class="svg-faint" letter-spacing="2">VOTE LOCKOUT — DOUBLES EVERY CONSECUTIVE VOTE</text>
+      <line x1="40" y1="160" x2="720" y2="160" stroke="#222837" stroke-width="2"/>
+
+      <g>
+        <rect x="60"  y="120" width="40" height="40" fill="#9945ff" fill-opacity=".3" stroke="#9945ff" stroke-opacity=".7"/>
+        <text x="80"  y="180" text-anchor="middle" font-size="10" class="svg-dim">N</text>
+        <text x="80"  y="144" text-anchor="middle" font-size="9" fill="#fff">2</text>
+
+        <rect x="130" y="100" width="40" height="60" fill="#9945ff" fill-opacity=".4" stroke="#9945ff" stroke-opacity=".7"/>
+        <text x="150" y="180" text-anchor="middle" font-size="10" class="svg-dim">N+1</text>
+        <text x="150" y="134" text-anchor="middle" font-size="9" fill="#fff">4</text>
+
+        <rect x="200" y="78"  width="40" height="82" fill="#9945ff" fill-opacity=".5" stroke="#9945ff" stroke-opacity=".7"/>
+        <text x="220" y="180" text-anchor="middle" font-size="10" class="svg-dim">N+2</text>
+        <text x="220" y="112" text-anchor="middle" font-size="9" fill="#fff">8</text>
+
+        <rect x="270" y="50"  width="40" height="110" fill="#9945ff" fill-opacity=".6" stroke="#9945ff" stroke-opacity=".7"/>
+        <text x="290" y="180" text-anchor="middle" font-size="10" class="svg-dim">N+3</text>
+        <text x="290" y="84" text-anchor="middle" font-size="9" fill="#fff">16</text>
+
+        <rect x="340" y="20"  width="40" height="140" fill="#9945ff" fill-opacity=".7" stroke="#9945ff" stroke-opacity=".8"/>
+        <text x="360" y="180" text-anchor="middle" font-size="10" class="svg-dim">N+4</text>
+        <text x="360" y="54" text-anchor="middle" font-size="9" fill="#fff">32</text>
+      </g>
+
+      <text x="430" y="100" font-size="11" class="svg-dim">After 32 same-fork votes,</text>
+      <text x="430" y="116" font-size="11" class="svg-dim">earliest lockouts hit 2³² slots —</text>
+      <text x="430" y="132" font-size="11" fill="#14f195">effectively permanent (rooted)</text>
+
+      <text x="430" y="160" font-size="11" class="svg-dim">Switch fork? Need 38% stake proof</text>
+      <text x="430" y="176" font-size="11" class="svg-dim">on alternative (33% + buffer).</text>
+
+      <text x="20" y="218" font-size="11" class="svg-faint">Optimistic confirm = &gt;2/3 stake on slot. Rooted = 32 votes deep. Reversal would slash &gt;1/3 of total stake.</text>
+    </svg>
+    <div class="caption">TowerBFT's lockout-doubling. The economic cost of reversing a vote grows exponentially as you stack more votes on the same fork.</div>
+  </div>
+
+  <ol class="steps">
+    <li data-n="37"><b>Validator replays a block → constructs a vote tx</b>: "I, validator X, vote for slot N on fork F."</li>
+    <li data-n="38"><b>Vote tx sent</b> via <code>tpu_vote</code> socket (or gossip). It's a regular tx — pays fees, lands in a future block.</li>
+    <li data-n="39"><b>Vote Program records it</b> in the validator's vote account (a tower of recent votes + lockouts).</li>
+    <li data-n="40"><b>Lockout doubles</b> on each consecutive same-fork vote. 32 votes deep = 2³² slots = effectively permanent.</li>
+    <li data-n="41"><b>Fork choice = heaviest sub-tree.</b> Validators always vote on the branch with most cumulative stake.</li>
+    <li data-n="42"><b>Optimistic confirm</b> at &gt;2/3 stake. Rollback would slash &gt;1/3.</li>
+    <li data-n="43"><b>Rooted (finalized)</b> after 32 subsequent slots with &gt;2/3 stake voting on top of slot N.</li>
+    <li data-n="44"><b>Switch proof needed to fork:</b> 38% stake on an alternative your previous fork can't catch (33% + 4.66% buffer).</li>
+  </ol>
+
+  <div class="callout">
+    <span class="label">★ Insight</span>
+    <p>Vote txs consume ~75% of Solana ledger bandwidth today. <strong>Alpenglow's Votor moves votes off-chain</strong> via BLS aggregation — that single change shrinks the ledger ~75% and enables 100-150ms finality. It's the biggest throughput win on the roadmap.</p>
+  </div>
+
+  <hr>
+
+  <!-- ====== Part 7 ====== -->
+  <h2 id="p7"><span class="num">07</span>Gossip Protocol <span class="pill">always on</span></h2>
+  <p class="sub">The cluster-wide chat that handles everything shreds can't.</p>
+
+  <ol class="steps">
+    <li data-n="45"><b>Push messages</b> — contact info, recent votes, snapshot hash, stake info — broadcast periodically.</li>
+    <li data-n="46"><b>Pull responses</b> for catch-up after a node falls behind.</li>
+    <li data-n="47"><b>Push graph self-balances</b> — each node picks a small random peer set per round.</li>
+    <li data-n="48"><b>Bloom filters</b> dedupe traffic so the same vote isn't rebroadcast endlessly.</li>
+    <li data-n="49"><b>Repair requests</b> ride this channel — "send me shreds 47-52 of slot N."</li>
+  </ol>
+
+  <hr>
+
+  <!-- ====== Part 8 ====== -->
+  <h2 id="p8"><span class="num">08</span>AccountsDB &amp; State Persistence</h2>
+  <p class="sub">The ~1.5TB append-only state database that every executed tx writes to.</p>
+
+  <ol class="steps">
+    <li data-n="50"><b>Every executed tx → AccountsDB.</b> Massive append-only store.</li>
+    <li data-n="51"><b>AppendVec</b> — memory-mapped files holding successive account versions.</li>
+    <li data-n="52"><b>State partitioned by slot.</b> Current Bank tracks deltas on top of previous slot's state.</li>
+    <li data-n="53"><b>Cleanup / shrink</b> runs periodically. Old account versions in AppendVecs get pruned + compacted.</li>
+    <li data-n="54"><b>Snapshots</b> every ~100 slots — frozen rooted state, tar'd, used by new validators to bootstrap without genesis replay.</li>
+    <li data-n="55"><b>AccountsHash</b> — every account's data + metadata Merkle-hashed into the BankHash. This is what consensus actually agrees on.</li>
+  </ol>
+
+  <hr>
+
+  <!-- ====== Part 9 ====== -->
+  <h2 id="p9"><span class="num">09</span>The SVM Runtime</h2>
+  <p class="sub">How programs actually execute. The "Sealevel" parallel engine.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 760 200" width="760">
+      <!-- tx envelope -->
+      <rect x="20" y="20" width="200" height="160" rx="8" fill="#161a24" stroke="#56b6ff" stroke-opacity=".5"/>
+      <text x="120" y="42" text-anchor="middle" font-size="12" fill="#fff" font-weight="600">Transaction</text>
+      <text x="30" y="64" font-size="11" class="svg-dim">recent_blockhash</text>
+      <text x="30" y="82" font-size="11" class="svg-dim">fee_payer</text>
+      <text x="30" y="100" font-size="11" class="svg-mono svg-dim">account_meta[]:</text>
+      <text x="40" y="116" font-size="10" class="svg-dim">  · pubkey · writable</text>
+      <text x="40" y="130" font-size="10" class="svg-dim">  · pubkey · readonly</text>
+      <text x="30" y="150" font-size="11" class="svg-mono svg-dim">instruction[]:</text>
+      <text x="40" y="166" font-size="10" class="svg-dim">  · program_id · data</text>
+
+      <line x1="225" y1="100" x2="265" y2="100" stroke="#9945ff" stroke-width="1.5"/>
+      <text x="245" y="92" text-anchor="middle" font-size="9" class="svg-dim">scheduler</text>
+
+      <!-- SVM -->
+      <rect x="270" y="20" width="260" height="160" rx="8" fill="#1c1530" stroke="#9945ff" stroke-opacity=".7"/>
+      <text x="400" y="42" text-anchor="middle" font-size="12" fill="#fff" font-weight="600">SVM (BPF VM)</text>
+
+      <rect x="290" y="58" width="100" height="36" rx="4" fill="#0d1018" stroke="#9945ff" stroke-opacity=".4"/>
+      <text x="340" y="80" text-anchor="middle" font-size="10" fill="#fff">load accounts</text>
+
+      <rect x="410" y="58" width="100" height="36" rx="4" fill="#0d1018" stroke="#9945ff" stroke-opacity=".4"/>
+      <text x="460" y="80" text-anchor="middle" font-size="10" fill="#fff">walk instructions</text>
+
+      <rect x="290" y="104" width="100" height="36" rx="4" fill="#0d1018" stroke="#9945ff" stroke-opacity=".4"/>
+      <text x="340" y="126" text-anchor="middle" font-size="10" fill="#fff">CPI · depth ≤ 4</text>
+
+      <rect x="410" y="104" width="100" height="36" rx="4" fill="#0d1018" stroke="#9945ff" stroke-opacity=".4"/>
+      <text x="460" y="126" text-anchor="middle" font-size="10" fill="#fff">CU meter</text>
+
+      <rect x="290" y="150" width="220" height="20" rx="4" fill="#0d1018" stroke="#14f195" stroke-opacity=".5"/>
+      <text x="400" y="164" text-anchor="middle" font-size="10" fill="#fff">commit if success · rollback if any failure</text>
+
+      <line x1="535" y1="100" x2="575" y2="100" stroke="#14f195" stroke-width="1.5"/>
+      <rect x="580" y="60" width="160" height="80" rx="8" fill="#161a24" stroke="#14f195" stroke-opacity=".5"/>
+      <text x="660" y="84" text-anchor="middle" font-size="12" fill="#fff" font-weight="600">AccountsDB</text>
+      <text x="660" y="102" text-anchor="middle" font-size="10" class="svg-dim">write deltas</text>
+      <text x="660" y="116" text-anchor="middle" font-size="10" class="svg-dim">AppendVec mmap</text>
+      <text x="660" y="130" text-anchor="middle" font-size="10" class="svg-dim">→ BankHash</text>
+    </svg>
+    <div class="caption">Why Solana parallelizes: every tx pre-declares its account access. The scheduler reasons about conflicts <em>before</em> executing anything.</div>
+  </div>
+
+  <ol class="steps">
+    <li data-n="56"><b>Program = BPF binary</b> stored in an account marked <code>executable</code>. Written in Rust/C.</li>
+    <li data-n="57"><b>SVM loads tx accounts</b> — writable accounts cloned, read-only borrowed.</li>
+    <li data-n="58"><b>Walks each instruction:</b> looks up target program → invokes BPF entry → passes data + account context.</li>
+    <li data-n="59"><b>CPI</b> lets programs call other programs mid-execution. Stack depth limit: 4.</li>
+    <li data-n="60"><b>CU tracked per instruction.</b> Default 200k/tx, max 1.4M/tx. Block: 60M. Per writable account: 12M.</li>
+    <li data-n="61"><b>PDAs</b> — accounts owned by programs, derived from seeds. No private key.</li>
+    <li data-n="62"><b>Sysvars</b> hold cluster state (clock, rent, blockhashes) readable by programs.</li>
+    <li data-n="63"><b>State writes commit only if entire tx succeeds.</b> Any instruction failure → atomic rollback.</li>
+  </ol>
+
+  <div class="callout">
+    <span class="label">★ Insight</span>
+    <p>The <strong>declarative account access model is the entire reason Sealevel works.</strong> Ethereum can't trivially parallelize because you only learn what state a tx touched <em>after</em> executing it. Solana txs ship with their full access list — the scheduler can build conflict-free batches before anything runs. This is the single architectural choice that defines Solana's parallelism story.</p>
+  </div>
+
+  <hr>
+
+  <!-- ====== Part 10 ====== -->
+  <h2 id="p10"><span class="num">10</span>Epoch &amp; Stake Lifecycle</h2>
+  <p class="sub">The long-running loop that defines who leads what slot.</p>
+
+  <ol class="steps">
+    <li data-n="64"><b>Epoch boundary every ~432,000 slots</b> (~2 days). At each boundary: stake activates (delegated last epoch), deactivates (cooldown), inflation rewards distribute, leader schedule for next epoch computes from current stake state.</li>
+    <li data-n="65"><b>Validators register</b> a vote account + identity account when joining. Vote account has commission %.</li>
+    <li data-n="66"><b>Stakers delegate</b> by creating a stake account pointing at a vote account. JitoSOL etc. abstract this into liquid wrappers.</li>
+    <li data-n="67"><b>Leader selection = stake-weighted pseudorandom over the epoch</b>, granting 4-consecutive-slot windows. 2% stake → ~2% of slots in 4-slot chunks.</li>
+  </ol>
+
+  <hr>
+
+  <!-- ====== Part 11 ====== -->
+  <h2 id="p11"><span class="num">11</span>Where the MEV Stack Plugs In</h2>
+  <p class="sub">Everything from earlier conversations, located precisely on the sequence above.</p>
+
+  <ol class="steps">
+    <li data-n="68"><b>Jito-Solana = Agave fork</b> adding RelayerStage (200ms hold, pseudo-mempool), BlockEngineStage (gRPC to central auction), BundleStage (atomic bundle execution before Banking).</li>
+    <li data-n="69"><b>Bundles</b> = ≤5 txs, atomic, same-slot. Include transfer to one of 8 tip PDAs.</li>
+    <li data-n="70"><b>TipRouter NCN distributes tips</b> at epoch boundary — 3% to Jito DAO/NCN, 97% to validator + stakers per MEV commission.</li>
+    <li data-n="71"><b>Harmonic = sidecar</b> (<code>harmonic/proposer</code>) alongside Agave. When validator is leader: receives candidate blocks from N independent builders via Harmonic engine, applies configured policy, selects winner. Falls back to local build if engine fails.</li>
+    <li data-n="72"><b>Searchers</b> submit bundles to Jito's block engine AND Harmonic's whitelisted endpoint. Real-time DEX / mempool / lending monitoring; race for inclusion.</li>
+  </ol>
+
+  <hr>
+
+  <!-- ====== Part 12 ====== -->
+  <h2 id="p12"><span class="num">12</span>The Roadmap (What Changes)</h2>
+
+  <div class="diagram">
+    <svg viewBox="0 0 760 220" width="760">
+      <line x1="40" y1="110" x2="720" y2="110" stroke="#222837" stroke-width="2"/>
+
+      <circle cx="80"  cy="110" r="8" fill="#14f195"/>
+      <text x="80"  y="92" text-anchor="middle" font-size="10" class="svg-mono svg-dim">NOW</text>
+      <text x="80"  y="136" text-anchor="middle" font-size="11" fill="#fff" font-weight="600">Today</text>
+      <text x="80"  y="152" text-anchor="middle" font-size="9" class="svg-dim">Agave 3.1</text>
+      <text x="80"  y="166" text-anchor="middle" font-size="9" class="svg-dim">Frankendancer 26%</text>
+
+      <circle cx="220" cy="110" r="8" fill="#56b6ff"/>
+      <text x="220" y="92" text-anchor="middle" font-size="10" class="svg-mono svg-dim">Q3 2026</text>
+      <text x="220" y="136" text-anchor="middle" font-size="11" fill="#fff" font-weight="600">Alpenglow</text>
+      <text x="220" y="152" text-anchor="middle" font-size="9" class="svg-dim">Votor 100-150ms</text>
+      <text x="220" y="166" text-anchor="middle" font-size="9" class="svg-dim">votes off-chain</text>
+
+      <circle cx="380" cy="110" r="8" fill="#56b6ff"/>
+      <text x="380" y="92" text-anchor="middle" font-size="10" class="svg-mono svg-dim">LATE 2026</text>
+      <text x="380" y="136" text-anchor="middle" font-size="11" fill="#fff" font-weight="600">Rotor + Const.</text>
+      <text x="380" y="152" text-anchor="middle" font-size="9" class="svg-dim">single-hop shreds</text>
+      <text x="380" y="166" text-anchor="middle" font-size="9" class="svg-dim">50ms attester cycle</text>
+
+      <circle cx="540" cy="110" r="8" fill="#9945ff"/>
+      <text x="540" y="92" text-anchor="middle" font-size="10" class="svg-mono svg-dim">2027+</text>
+      <text x="540" y="136" text-anchor="middle" font-size="11" fill="#fff" font-weight="600">APE</text>
+      <text x="540" y="152" text-anchor="middle" font-size="9" class="svg-dim">block = ordering only</text>
+      <text x="540" y="166" text-anchor="middle" font-size="9" class="svg-dim">formal builder role</text>
+
+      <circle cx="700" cy="110" r="8" fill="#9945ff"/>
+      <text x="700" y="92" text-anchor="middle" font-size="10" class="svg-mono svg-dim">2027+</text>
+      <text x="700" y="136" text-anchor="middle" font-size="11" fill="#fff" font-weight="600">ACE</text>
+      <text x="700" y="152" text-anchor="middle" font-size="9" class="svg-dim">app-defined ordering</text>
+
+      <text x="40" y="200" font-size="11" class="svg-faint">Each step makes block production faster, more protocol-constrained, and changes what off-validator overlays can sell.</text>
+    </svg>
+    <div class="caption">The roadmap. Alpenglow lands first and is the biggest near-term win. APE is the structural break that reshapes block building permanently.</div>
+  </div>
+
+  <ol class="steps">
+    <li data-n="73"><b>Alpenglow (Q3 2026):</b> Tower BFT → Votor (BLS, 100-150ms finality). Turbine → Rotor (single-hop, Phase 2). PoH-as-clock → fixed 400ms intervals.</li>
+    <li data-n="74"><b>Firedancer continues maturing.</b> Frankendancer ~26% stake. Full Firedancer ~5% and growing. Provides true client diversity + deterministic latency.</li>
+    <li data-n="75"><b>Constellation (late 2026 - 2027):</b> 16 Proposers + 256 Attesters on 50ms cycles. Pslices attested by ≥40% MUST be included = protocol-enforced censorship resistance.</li>
+    <li data-n="76"><b>APE (2027+):</b> consensus and execution decoupled. Block becomes pure ordering commit. <code>UserBlockSlots</code> = formal builder role.</li>
+    <li data-n="77"><b>ACE (2027+):</b> contracts dictate their own tx sequencing. Protocols enforce FIFO or app-defined ordering at the protocol layer.</li>
+  </ol>
+
+  <hr>
+
+  <!-- ====== Loop ====== -->
+  <h2 id="loop"><span class="num">13</span>The Loop in One Picture</h2>
+
+  <div class="diagram">
+    <svg viewBox="0 0 760 360" width="760">
+      <defs>
+        <marker id="lr" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#9945ff"/></marker>
+      </defs>
+
+      <rect x="280" y="20"  width="200" height="36" rx="8" fill="#161a24" stroke="#56b6ff" stroke-opacity=".5"/>
+      <text x="380" y="42" text-anchor="middle" font-size="12" fill="#fff">RPC → Gulf Stream</text>
+
+      <line x1="380" y1="56" x2="380" y2="76" stroke="#9945ff" stroke-width="1.5" marker-end="url(#lr)"/>
+
+      <rect x="240" y="80" width="280" height="48" rx="8" fill="#1c1530" stroke="#9945ff" stroke-opacity=".7"/>
+      <text x="380" y="100" text-anchor="middle" font-size="12" fill="#fff" font-weight="600">Leader TPU (400ms)</text>
+      <text x="380" y="118" text-anchor="middle" font-size="10" class="svg-dim">Fetch → SigVerify → Banking → PoH → Broadcast</text>
+
+      <line x1="380" y1="128" x2="380" y2="148" stroke="#9945ff" stroke-width="1.5" marker-end="url(#lr)"/>
+
+      <rect x="270" y="152" width="220" height="40" rx="8" fill="#161a24" stroke="#14f195" stroke-opacity=".5"/>
+      <text x="380" y="176" text-anchor="middle" font-size="12" fill="#fff">Turbine → ~2000 validators</text>
+
+      <line x1="380" y1="192" x2="380" y2="212" stroke="#9945ff" stroke-width="1.5" marker-end="url(#lr)"/>
+
+      <rect x="270" y="216" width="220" height="40" rx="8" fill="#161a24" stroke="#9945ff" stroke-opacity=".5"/>
+      <text x="380" y="240" text-anchor="middle" font-size="12" fill="#fff">ReplayStage on every node</text>
+
+      <line x1="380" y1="256" x2="380" y2="276" stroke="#9945ff" stroke-width="1.5" marker-end="url(#lr)"/>
+
+      <rect x="270" y="280" width="220" height="40" rx="8" fill="#161a24" stroke="#56b6ff" stroke-opacity=".5"/>
+      <text x="380" y="304" text-anchor="middle" font-size="12" fill="#fff">Vote tx → leader</text>
+
+      <!-- loop back -->
+      <path d="M 490 300 C 700 300, 700 40, 480 40" fill="none" stroke="#9945ff" stroke-opacity=".5" stroke-width="1.5" stroke-dasharray="4,3"/>
+      <text x="660" y="170" font-size="10" class="svg-dim">next slot</text>
+
+      <!-- right: bg processes -->
+      <text x="20" y="40" font-size="10" class="svg-faint" letter-spacing="1.5">CONTINUOUS</text>
+      <text x="20" y="60" font-size="11" class="svg-dim">▸ gossip</text>
+      <text x="20" y="78" font-size="11" class="svg-dim">▸ repair</text>
+      <text x="20" y="96" font-size="11" class="svg-dim">▸ snapshots</text>
+      <text x="20" y="114" font-size="11" class="svg-dim">▸ AccountsDB writes</text>
+      <text x="20" y="132" font-size="11" class="svg-dim">▸ epoch clock</text>
+      <text x="20" y="150" font-size="11" class="svg-dim">▸ stake activation</text>
+
+      <text x="20" y="200" font-size="10" class="svg-faint" letter-spacing="1.5">ON LEADER ONLY</text>
+      <text x="20" y="220" font-size="11" class="svg-dim">▸ Jito RelayerStage</text>
+      <text x="20" y="238" font-size="11" class="svg-dim">▸ Jito BlockEngineStage</text>
+      <text x="20" y="256" font-size="11" class="svg-dim">▸ Jito BundleStage</text>
+      <text x="20" y="274" font-size="11" class="svg-dim">▸ Harmonic engine</text>
+
+      <text x="380" y="345" text-anchor="middle" font-size="11" fill="#14f195">After 32 same-fork votes: rooted (finalized)</text>
+    </svg>
+    <div class="caption">Every Solana slot is one full instance of this loop in 400ms. Block-building overlays live entirely on the leader; consensus + replay run on everyone.</div>
+  </div>
+
+  <hr>
+
+  <!-- ====== Three layers ====== -->
+  <h2 id="frame"><span class="num">14</span>The Three-Layer Frame</h2>
+  <p class="sub">If you only carry one mental model from this whole document, it's this one.</p>
+
+  <div class="table-wrap">
+    <table>
+      <tr><th>Layer</th><th>What it does</th><th>What lives here</th></tr>
+      <tr><td><strong>Network</strong></td><td>Move bytes between nodes</td><td>Gulf Stream · Turbine · Gossip · Repair · Shreds</td></tr>
+      <tr><td><strong>Consensus</strong></td><td>Decide which fork is canonical &amp; when slots become irreversible</td><td>TowerBFT (today) · Votor (Alpenglow)</td></tr>
+      <tr><td><strong>Execution</strong></td><td>Compute state</td><td>TPU · TVU · ReplayStage · SVM · AccountsDB</td></tr>
+    </table>
+  </div>
+
+  <p>The block-building wars (Jito, Harmonic, BAM, Paladin) all live entirely inside <strong>the execution layer</strong>, specifically inside the <strong>leader's TPU</strong>. They don't touch consensus. They don't change the network layer. They just influence what Banking decides to schedule.</p>
+
+  <p>This is why APE is so disruptive: it's the first proposal to <strong>break consensus and execution apart</strong>, moving the block-building battlefield from "an in-process integration with the leader" to "a formal protocol role with its own slots and signatures." Everything Harmonic is building is a pre-position for that world.</p>
+
+  <blockquote>
+    The leader runs everything in 400ms. Every other component of Solana exists either (a) to feed the leader transactions, (b) to verify the leader's output, or (c) to influence what the leader decides to schedule.
+  </blockquote>
+
+  <div class="callout">
+    <span class="label">★ Lecture frame</span>
+    <p>The moment the Harmonic speaker says anything about block construction, mentally locate it on this sequence. They're operating between <strong>step 14</strong> (tx leaves SigVerify) and <strong>step 23</strong> (entry handed to broadcast). Everything else is unchanged. If they're describing something outside that window — ask why.</p>
+  </div>
+
+  <footer>
+    Built 2026-05-28 · companion to harmonic-lecture-prep.html · Turbin3 Adv SVM cohort. Source briefs in <code>~/Brain/Research/solana/</code>.
+  </footer>
+
+</main>
+
+<aside>
+  <div class="toc-title">CONTENTS</div>
+  <ul class="toc">
+    <li><a href="#map"><span class="num">00</span>10,000-ft map</a></li>
+    <li><a href="#p1"><span class="num">01</span>Client side</a></li>
+    <li><a href="#p2"><span class="num">02</span>Gulf Stream</a></li>
+    <li><a href="#p3"><span class="num">03</span>Leader TPU</a></li>
+    <li><a href="#p4"><span class="num">04</span>Turbine</a></li>
+    <li><a href="#p5"><span class="num">05</span>TVU + Replay</a></li>
+    <li><a href="#p6"><span class="num">06</span>Consensus</a></li>
+    <li><a href="#p7"><span class="num">07</span>Gossip</a></li>
+    <li><a href="#p8"><span class="num">08</span>AccountsDB</a></li>
+    <li><a href="#p9"><span class="num">09</span>SVM</a></li>
+    <li><a href="#p10"><span class="num">10</span>Epoch + stake</a></li>
+    <li><a href="#p11"><span class="num">11</span>MEV stack</a></li>
+    <li><a href="#p12"><span class="num">12</span>Roadmap</a></li>
+    <li><a href="#loop"><span class="num">13</span>The loop</a></li>
+    <li><a href="#frame"><span class="num">14</span>3-layer frame</a></li>
+  </ul>
+</aside>
+
+</div>
+</body>
+</html>
