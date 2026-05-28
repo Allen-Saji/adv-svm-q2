@@ -1,0 +1,1304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Block Building on Solana — Lecture Prep</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0c11;
+    --bg-elevated:#11141c;
+    --bg-soft:#161a24;
+    --border:#222837;
+    --border-soft:#1b2030;
+    --text:#e6e8ee;
+    --text-dim:#9ba3b4;
+    --text-faint:#6a7383;
+    --accent:#9945ff;     /* Solana purple */
+    --accent-2:#14f195;   /* Solana green */
+    --accent-warm:#ffb454;
+    --accent-red:#f7657c;
+    --accent-blue:#56b6ff;
+    --code-bg:#0d1018;
+    --pure:radial-gradient(120% 80% at 50% 0%,rgba(153,69,255,.08),transparent 60%);
+    --maxw:880px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:'Inter',system-ui,-apple-system,sans-serif;
+    background:var(--bg);
+    color:var(--text);
+    font-size:16px;
+    line-height:1.65;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+  body::before{
+    content:"";position:fixed;inset:0;pointer-events:none;
+    background:var(--pure);z-index:0;
+  }
+  .layout{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) 240px;
+    gap:64px;
+    max-width:1240px;
+    margin:0 auto;
+    padding:48px 32px 120px;
+    position:relative;z-index:1;
+  }
+  @media (max-width:960px){
+    .layout{grid-template-columns:1fr;gap:32px;padding:32px 20px 80px}
+    aside{display:none}
+  }
+  main{max-width:var(--maxw);min-width:0}
+
+  /* ---------- Hero ---------- */
+  .eyebrow{
+    font-family:'JetBrains Mono',monospace;
+    font-size:11px;
+    letter-spacing:.18em;
+    text-transform:uppercase;
+    color:var(--text-faint);
+    margin-bottom:24px;
+  }
+  .eyebrow span{color:var(--accent)}
+  h1{
+    font-size:48px;
+    line-height:1.08;
+    font-weight:600;
+    letter-spacing:-.025em;
+    margin:0 0 20px;
+    background:linear-gradient(180deg,#fff 0%,#cfd4e0 100%);
+    -webkit-background-clip:text;
+    background-clip:text;
+    color:transparent;
+  }
+  .lede{
+    font-size:19px;
+    color:var(--text-dim);
+    line-height:1.6;
+    max-width:680px;
+    margin:0 0 40px;
+  }
+  .meta-row{
+    display:flex;gap:16px;flex-wrap:wrap;
+    padding:14px 18px;
+    border:1px solid var(--border);
+    background:var(--bg-elevated);
+    border-radius:10px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:12px;
+    color:var(--text-dim);
+    margin-bottom:48px;
+  }
+  .meta-row b{color:var(--text);font-weight:500}
+  .meta-row span+span{padding-left:16px;border-left:1px solid var(--border)}
+
+  /* ---------- Typography ---------- */
+  h2{
+    font-size:30px;
+    line-height:1.2;
+    font-weight:600;
+    letter-spacing:-.02em;
+    margin:80px 0 8px;
+    color:#fff;
+    scroll-margin-top:24px;
+  }
+  h2 .num{
+    font-family:'JetBrains Mono',monospace;
+    color:var(--accent);
+    font-size:14px;
+    font-weight:500;
+    margin-right:14px;
+    vertical-align:middle;
+    letter-spacing:.05em;
+  }
+  h2 + .sub{color:var(--text-dim);font-size:15px;margin:0 0 32px;max-width:640px}
+  h3{
+    font-size:20px;
+    font-weight:600;
+    margin:40px 0 12px;
+    color:#fff;
+    letter-spacing:-.01em;
+  }
+  h4{
+    font-size:14px;
+    font-weight:600;
+    text-transform:uppercase;
+    letter-spacing:.1em;
+    color:var(--accent-2);
+    margin:28px 0 10px;
+    font-family:'JetBrains Mono',monospace;
+  }
+  p{margin:0 0 16px}
+  a{color:var(--accent-blue);text-decoration:none;border-bottom:1px solid rgba(86,182,255,.3)}
+  a:hover{border-color:var(--accent-blue)}
+  strong{color:#fff;font-weight:600}
+  em{color:var(--text);font-style:italic}
+
+  /* ---------- Code ---------- */
+  code{
+    font-family:'JetBrains Mono',monospace;
+    font-size:.88em;
+    background:var(--code-bg);
+    border:1px solid var(--border-soft);
+    color:#d8dde8;
+    padding:1px 6px;
+    border-radius:4px;
+  }
+  pre{
+    background:var(--code-bg);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:16px 18px;
+    overflow-x:auto;
+    font-size:13px;
+    line-height:1.55;
+    margin:16px 0;
+  }
+  pre code{background:none;border:0;padding:0;color:#d8dde8}
+
+  /* ---------- Callouts ---------- */
+  .callout{
+    margin:24px 0;
+    border:1px solid var(--border);
+    border-left:3px solid var(--accent);
+    background:var(--bg-elevated);
+    border-radius:6px;
+    padding:18px 22px;
+  }
+  .callout .label{
+    font-family:'JetBrains Mono',monospace;
+    font-size:11px;
+    letter-spacing:.16em;
+    text-transform:uppercase;
+    color:var(--accent);
+    font-weight:600;
+    margin-bottom:6px;
+    display:block;
+  }
+  .callout p:last-child{margin-bottom:0}
+  .callout.insight{border-left-color:var(--accent)}
+  .callout.insight .label{color:var(--accent)}
+  .callout.watch{border-left-color:var(--accent-warm)}
+  .callout.watch .label{color:var(--accent-warm)}
+  .callout.question{border-left-color:var(--accent-2)}
+  .callout.question .label{color:var(--accent-2)}
+  .callout.warn{border-left-color:var(--accent-red)}
+  .callout.warn .label{color:var(--accent-red)}
+
+  /* ---------- Tables ---------- */
+  .table-wrap{margin:24px 0;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{padding:12px 16px;text-align:left;border-bottom:1px solid var(--border-soft);vertical-align:top}
+  th{background:var(--bg-elevated);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim)}
+  tr:last-child td{border-bottom:0}
+  td code{font-size:12px}
+
+  /* ---------- Lists ---------- */
+  ul,ol{padding-left:22px;margin:0 0 16px}
+  li{margin-bottom:6px}
+  li::marker{color:var(--text-faint)}
+  ul.clean{list-style:none;padding-left:0}
+  ul.clean li{padding-left:20px;position:relative}
+  ul.clean li::before{content:"";position:absolute;left:0;top:.65em;width:6px;height:6px;background:var(--accent);border-radius:50%}
+
+  /* ---------- Stat cards ---------- */
+  .stats{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+    gap:12px;
+    margin:24px 0;
+  }
+  .stat{
+    background:var(--bg-elevated);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:16px 18px;
+  }
+  .stat .v{font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:600;color:#fff}
+  .stat .k{font-size:12px;color:var(--text-dim);margin-top:4px;text-transform:uppercase;letter-spacing:.05em}
+
+  /* ---------- Diagram container ---------- */
+  .diagram{
+    background:var(--bg-elevated);
+    border:1px solid var(--border);
+    border-radius:14px;
+    padding:28px;
+    margin:28px 0;
+    overflow-x:auto;
+  }
+  .diagram svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .diagram .caption{
+    margin-top:18px;
+    font-size:13px;
+    color:var(--text-dim);
+    text-align:center;
+    line-height:1.5;
+  }
+
+  /* ---------- TOC ---------- */
+  aside{
+    position:sticky;top:24px;align-self:start;
+    max-height:calc(100vh - 48px);overflow-y:auto;
+  }
+  .toc-title{
+    font-family:'JetBrains Mono',monospace;
+    font-size:11px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--text-faint);
+    margin-bottom:14px;
+  }
+  .toc{list-style:none;padding:0;margin:0;font-size:13px;line-height:1.5}
+  .toc li{margin:0;padding:6px 0;border-left:1px solid var(--border-soft)}
+  .toc a{
+    display:block;padding-left:14px;color:var(--text-dim);
+    border:0;transition:color .15s;
+  }
+  .toc a:hover{color:var(--accent)}
+  .toc .num{
+    font-family:'JetBrains Mono',monospace;
+    color:var(--text-faint);
+    margin-right:6px;
+    font-size:11px;
+  }
+
+  /* ---------- SVG defaults ---------- */
+  svg text{font-family:'Inter',sans-serif;fill:var(--text)}
+  .svg-mono{font-family:'JetBrains Mono',monospace !important;font-size:11px}
+  .svg-dim{fill:var(--text-dim)}
+  .svg-faint{fill:var(--text-faint)}
+  .svg-purple{fill:var(--accent)}
+  .svg-green{fill:var(--accent-2)}
+
+  /* ---------- Comparison columns ---------- */
+  .compare{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:16px;
+    margin:24px 0;
+  }
+  .compare > div{
+    background:var(--bg-elevated);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:20px 22px;
+  }
+  .compare h4{margin-top:0}
+  .compare .vs{
+    background:linear-gradient(180deg,rgba(153,69,255,.15),transparent);
+  }
+  @media (max-width:600px){.compare{grid-template-columns:1fr}}
+
+  /* ---------- Pull quote ---------- */
+  blockquote{
+    margin:24px 0;
+    padding:0 0 0 24px;
+    border-left:3px solid var(--accent-2);
+    font-size:18px;
+    line-height:1.5;
+    color:#fff;
+    font-style:italic;
+  }
+  blockquote cite{
+    display:block;
+    font-size:13px;
+    font-style:normal;
+    color:var(--text-dim);
+    margin-top:10px;
+  }
+
+  /* ---------- Tags ---------- */
+  .tag{
+    display:inline-block;
+    font-family:'JetBrains Mono',monospace;
+    font-size:10px;
+    letter-spacing:.1em;
+    text-transform:uppercase;
+    padding:2px 8px;
+    border-radius:3px;
+    margin-right:6px;
+    vertical-align:middle;
+  }
+  .tag.now{background:rgba(20,241,149,.12);color:var(--accent-2);border:1px solid rgba(20,241,149,.3)}
+  .tag.soon{background:rgba(255,180,84,.12);color:var(--accent-warm);border:1px solid rgba(255,180,84,.3)}
+  .tag.later{background:rgba(153,69,255,.12);color:var(--accent);border:1px solid rgba(153,69,255,.3)}
+  .tag.live{background:rgba(86,182,255,.12);color:var(--accent-blue);border:1px solid rgba(86,182,255,.3)}
+
+  /* ---------- Section divider ---------- */
+  hr{
+    border:0;
+    height:1px;
+    background:linear-gradient(90deg,transparent,var(--border),transparent);
+    margin:64px 0;
+  }
+
+  /* ---------- Footer ---------- */
+  footer{
+    margin-top:80px;
+    padding-top:32px;
+    border-top:1px solid var(--border);
+    font-size:13px;
+    color:var(--text-faint);
+  }
+  footer a{color:var(--text-dim)}
+</style>
+</head>
+<body>
+
+<div class="layout">
+<main>
+
+  <div class="eyebrow"><span>●</span> Lecture prep · 2026-05-28 · Turbin3 Adv SVM cohort</div>
+  <h1>Block Building on Solana</h1>
+  <p class="lede">From the leader's TPU pipeline all the way up to Harmonic's multi-builder marketplace and what Alpenglow + APE do to all of it. Built to be read in one sitting before today's Harmonic guest lecture.</p>
+
+  <div class="meta-row">
+    <span><b>Speaker:</b> Harmonic team (harmonic.gg)</span>
+    <span><b>Goal:</b> follow + ask substantive questions</span>
+    <span><b>Read time:</b> ~25 min</span>
+  </div>
+
+  <!-- ============================================================= -->
+  <h2 id="s1"><span class="num">01</span>The 30-Second Mental Model</h2>
+  <p class="sub">If you remember nothing else, hold onto this frame the whole lecture.</p>
+
+  <p>On Ethereum, <strong>proposers and builders are separate roles</strong>. The validator who is up to propose a slot doesn't decide what goes in the block — they pick the most lucrative pre-built block from a market of builders (MEV-Boost, ePBS). It's an explicit auction with a defined interface.</p>
+
+  <p>On Solana, <strong>the leader IS the block builder</strong>. The validator whose 4-slot window is currently active runs the entire TPU pipeline in-process: receives transactions, schedules them, executes them, hashes them into PoH, and broadcasts. There is no native interface for an outside builder to hand the leader a pre-built block.</p>
+
+  <p>Every block-building company on Solana — Jito, Harmonic, Paladin, BAM, Temporal — exists to <strong>influence the leader's scheduling decisions</strong> without breaking that monolithic model. They are <em>overlays</em>, not replacements. The structural fight today is over <em>how much</em> they should influence it, <em>who</em> gets to do the influencing, and whether that should be one operator or many.</p>
+
+  <div class="callout insight">
+    <span class="label">★ Anchor insight</span>
+    <p>Solana block building isn't a market — it's an <strong>integration pattern</strong>. The economic and political fight is over what shape that integration takes: single-builder client fork (Jito), multi-builder aggregation (Harmonic), TEE-secured sequencing (BAM), or eventually protocol-level builder roles (APE + Constellation).</p>
+  </div>
+
+  <hr>
+
+  <!-- ============================================================= -->
+  <h2 id="s2"><span class="num">02</span>Slots, Leaders, Epochs</h2>
+  <p class="sub">The clock that everything else hangs off.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="v">400ms</div><div class="k">slot duration</div></div>
+    <div class="stat"><div class="v">64</div><div class="k">ticks/slot</div></div>
+    <div class="stat"><div class="v">4 slots</div><div class="k">per leader = 1.6s</div></div>
+    <div class="stat"><div class="v">432k</div><div class="k">slots/epoch (~2 days)</div></div>
+  </div>
+
+  <div class="diagram">
+    <svg viewBox="0 0 760 220" width="760">
+      <defs>
+        <linearGradient id="leader-grad" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stop-color="#9945ff" stop-opacity=".8"/>
+          <stop offset="100%" stop-color="#9945ff" stop-opacity=".25"/>
+        </linearGradient>
+      </defs>
+
+      <!-- epoch context bar -->
+      <text x="20" y="30" font-size="11" class="svg-faint" letter-spacing="2">EPOCH N · 432,000 SLOTS · ~2 DAYS</text>
+      <rect x="20" y="40" width="720" height="14" rx="3" fill="#1b2030" stroke="#222837"/>
+      <rect x="220" y="40" width="80" height="14" rx="3" fill="url(#leader-grad)" stroke="#9945ff" stroke-opacity=".5"/>
+      <text x="260" y="74" text-anchor="middle" font-size="10" class="svg-dim">zoom →</text>
+
+      <!-- leader window detail -->
+      <text x="20" y="110" font-size="11" class="svg-faint" letter-spacing="2">VALIDATOR-X LEADER WINDOW · 4 CONSECUTIVE SLOTS · 1.6s</text>
+      <g>
+        <rect x="20" y="120"  width="170" height="60" rx="6" fill="#161a24" stroke="#9945ff" stroke-opacity=".5"/>
+        <rect x="200" y="120" width="170" height="60" rx="6" fill="#161a24" stroke="#9945ff" stroke-opacity=".5"/>
+        <rect x="380" y="120" width="170" height="60" rx="6" fill="#161a24" stroke="#9945ff" stroke-opacity=".5"/>
+        <rect x="560" y="120" width="170" height="60" rx="6" fill="#161a24" stroke="#9945ff" stroke-opacity=".5"/>
+        <text x="105" y="146" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">Slot N</text>
+        <text x="285" y="146" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">Slot N+1</text>
+        <text x="465" y="146" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">Slot N+2</text>
+        <text x="645" y="146" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">Slot N+3</text>
+        <text x="105" y="166" text-anchor="middle" font-size="11" class="svg-dim">400 ms · 64 ticks</text>
+        <text x="285" y="166" text-anchor="middle" font-size="11" class="svg-dim">400 ms · 64 ticks</text>
+        <text x="465" y="166" text-anchor="middle" font-size="11" class="svg-dim">400 ms · 64 ticks</text>
+        <text x="645" y="166" text-anchor="middle" font-size="11" class="svg-dim">400 ms · 64 ticks</text>
+      </g>
+
+      <!-- handoff arrow -->
+      <text x="730" y="206" text-anchor="end" font-size="11" class="svg-faint">→ next leader</text>
+    </svg>
+    <div class="caption">Leader schedule is computed once per epoch from the previous epoch's stake state. Every validator independently arrives at the same schedule — no coordination needed.</div>
+  </div>
+
+  <p>Leaders are chosen by <strong>stake-weighted pseudorandom selection</strong>. 2% of stake → roughly 2% of slots, in 4-slot chunks. Slot positions are not uniformly spaced; they're statistically proportional to stake.</p>
+
+  <p>The 4-slot grouping matters because of <strong>Gulf Stream</strong>: the upcoming leader starts receiving forwarded transactions during the <em>previous</em> leader's last slot. This amortizes the cost of switching active leaders and is how Solana avoids the dead time you'd otherwise have between leader handoffs.</p>
+
+  <hr>
+
+  <!-- ============================================================= -->
+  <h2 id="s3"><span class="num">03</span>The TPU Pipeline</h2>
+  <p class="sub">"Block building" is literally one stage of this pipeline. Everything else is the leader doing leader things.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 780 240" width="780">
+      <defs>
+        <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L9,3 z" fill="#56b6ff"/>
+        </marker>
+      </defs>
+      <!-- ingress -->
+      <text x="20" y="20" font-size="10" class="svg-faint" letter-spacing="1.5">QUIC INGRESS</text>
+      <rect x="20" y="30" width="100" height="80" rx="8" fill="#161a24" stroke="#222837"/>
+      <text x="70" y="60" text-anchor="middle" font-size="12" fill="#fff" font-weight="600">tpu</text>
+      <text x="70" y="78" text-anchor="middle" font-size="10" class="svg-dim">user/RPC</text>
+      <text x="70" y="92" text-anchor="middle" font-size="10" class="svg-dim">tpu_vote</text>
+      <text x="70" y="105" text-anchor="middle" font-size="10" class="svg-dim">tpu_forwards</text>
+
+      <!-- fetch -->
+      <line x1="125" y1="70" x2="155" y2="70" stroke="#56b6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <rect x="160" y="40" width="110" height="60" rx="8" fill="#161a24" stroke="#56b6ff" stroke-opacity=".4"/>
+      <text x="215" y="64" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">Fetch</text>
+      <text x="215" y="82" text-anchor="middle" font-size="10" class="svg-dim">SWQoS, 100k buf</text>
+
+      <!-- sigverify -->
+      <line x1="275" y1="70" x2="305" y2="70" stroke="#56b6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <rect x="310" y="40" width="110" height="60" rx="8" fill="#161a24" stroke="#56b6ff" stroke-opacity=".4"/>
+      <text x="365" y="64" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">SigVerify</text>
+      <text x="365" y="82" text-anchor="middle" font-size="10" class="svg-dim">Ed25519 + dedup</text>
+
+      <!-- banking -->
+      <line x1="425" y1="70" x2="455" y2="70" stroke="#9945ff" stroke-width="2" marker-end="url(#arrow)"/>
+      <rect x="460" y="30" width="140" height="80" rx="8" fill="#1c1530" stroke="#9945ff" stroke-opacity=".8" stroke-width="1.5"/>
+      <text x="530" y="56" text-anchor="middle" font-size="14" fill="#fff" font-weight="600">Banking Stage</text>
+      <text x="530" y="74" text-anchor="middle" font-size="10" class="svg-purple">★ block building</text>
+      <text x="530" y="90" text-anchor="middle" font-size="10" class="svg-dim">scheduler + 4 workers</text>
+      <text x="530" y="103" text-anchor="middle" font-size="10" class="svg-dim">+ 2 vote workers</text>
+
+      <!-- poh -->
+      <line x1="605" y1="70" x2="635" y2="70" stroke="#56b6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <rect x="640" y="40" width="120" height="60" rx="8" fill="#161a24" stroke="#56b6ff" stroke-opacity=".4"/>
+      <text x="700" y="64" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">PoH Recorder</text>
+      <text x="700" y="82" text-anchor="middle" font-size="10" class="svg-dim">SHA-256 chain</text>
+
+      <!-- broadcast -->
+      <line x1="700" y1="105" x2="700" y2="135" stroke="#56b6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+      <rect x="630" y="140" width="140" height="60" rx="8" fill="#161a24" stroke="#14f195" stroke-opacity=".5"/>
+      <text x="700" y="164" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">Broadcast</text>
+      <text x="700" y="182" text-anchor="middle" font-size="10" class="svg-dim">shred → Turbine</text>
+      <text x="700" y="196" text-anchor="middle" font-size="10" class="svg-dim">32:32 FEC</text>
+
+      <!-- exit -->
+      <line x1="630" y1="170" x2="500" y2="170" stroke="#14f195" stroke-width="1.5" stroke-dasharray="3,3"/>
+      <text x="490" y="174" font-size="10" class="svg-dim" text-anchor="end">→ network</text>
+
+      <!-- legend -->
+      <text x="20" y="225" font-size="11" class="svg-faint">All stages run inside the validator process. Each is a separate thread (Agave) or tile (Firedancer).</text>
+    </svg>
+    <div class="caption">The Solana TPU pipeline. Block building lives inside Banking Stage — everything else is plumbing.</div>
+  </div>
+
+  <h3>Stage by stage</h3>
+  <ul class="clean">
+    <li><strong>Fetch.</strong> Three QUIC sockets: <code>tpu</code> (regular), <code>tpu_vote</code> (validator votes), <code>tpu_forwards</code> (overflow from previous leader). Stake-weighted QoS reserves 80% of capacity for staked nodes. 100k packet buffer.</li>
+    <li><strong>SigVerify.</strong> Ed25519 signature checks (SIMD-parallelized, GPU-capable). Dedups against the recent blockhash window. Firedancer can FPGA-accelerate this to 8M sigs/sec.</li>
+    <li><strong>Banking Stage.</strong> Where transactions actually get scheduled and executed against the bank. <strong>This is where every block-building company is fighting.</strong> See section 4.</li>
+    <li><strong>PoH Recorder.</strong> Single-core SHA-256 hash chain. Mixes executed transaction hashes into the chain and signs entries. Ticks every 6.25ms whether execution finished or not — if Banking falls behind, you get a partial block.</li>
+    <li><strong>Broadcast.</strong> Packs entries into ~1,200-byte shreds, applies 32:32 Reed-Solomon erasure coding (any 32 of 64 shreds can reconstruct), and pushes via Turbine's multi-hop tree.</li>
+  </ul>
+
+  <div class="callout watch">
+    <span class="label">Watch for</span>
+    <p>If the lecturer talks about "submitting blocks" or "block proposals," they are loose-talking — there is no native protocol for that today. They mean <em>submitting transaction bundles or candidate orderings that the leader chooses to honor.</em> The leader still constructs and signs the final block.</p>
+  </div>
+
+  <hr>
+
+  <!-- ============================================================= -->
+  <h2 id="s4"><span class="num">04</span>BankingStage: The Scheduler War</h2>
+  <p class="sub">The whole game is fought here. Old Agave had a famously bad scheduler. Fixing it changed Solana economics.</p>
+
+  <div class="compare">
+    <div>
+      <h4 style="color:var(--accent-red)">⊖ Legacy (pre-v1.18)</h4>
+      <p>4 worker threads, all pulling from one shared queue.</p>
+      <ul class="clean">
+        <li>No thread had visibility into what others were doing</li>
+        <li>All 4 would race to lock the same high-priority transactions</li>
+        <li>A thread might lock 1 of 128 attempted txs — 127 retries wasted</li>
+        <li>Lower-priority txs could land before higher-priority ones</li>
+        <li>Validators left ~80% of potential fees on the table</li>
+      </ul>
+    </div>
+    <div class="vs">
+      <h4 style="color:var(--accent-2)">⊕ Central Scheduler (default since 2.3)</h4>
+      <p>One dedicated 7th thread does scheduling. Workers wait.</p>
+      <ul class="clean">
+        <li>Scheduler builds a <strong>prio-graph</strong>: edges between conflicting txs per account</li>
+        <li>Workers receive guaranteed conflict-free batches via private channels</li>
+        <li>Strict priority-fee ordering preserved across threads</li>
+        <li>Agave 3.1 fixed a sync-overhead bug — banking went from 39% productive to 91%</li>
+        <li><strong>Up to 80% more fees per block</strong></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="diagram">
+    <svg viewBox="0 0 780 280" width="780">
+      <!-- Legacy side -->
+      <text x="20" y="22" font-size="12" font-weight="600" fill="#f7657c">LEGACY: 4 workers, shared queue, collisions</text>
+      <rect x="20" y="34" width="160" height="36" rx="6" fill="#161a24" stroke="#222837"/>
+      <text x="100" y="58" text-anchor="middle" font-size="12" fill="#fff">shared queue</text>
+
+      <!-- four workers racing -->
+      <g>
+        <rect x="20"  y="100" width="36" height="36" rx="4" fill="#1c1014" stroke="#f7657c" stroke-opacity=".6"/>
+        <rect x="62"  y="100" width="36" height="36" rx="4" fill="#1c1014" stroke="#f7657c" stroke-opacity=".6"/>
+        <rect x="104" y="100" width="36" height="36" rx="4" fill="#1c1014" stroke="#f7657c" stroke-opacity=".6"/>
+        <rect x="146" y="100" width="36" height="36" rx="4" fill="#1c1014" stroke="#f7657c" stroke-opacity=".6"/>
+        <text x="38"  y="123" text-anchor="middle" font-size="10" fill="#fff">w1</text>
+        <text x="80"  y="123" text-anchor="middle" font-size="10" fill="#fff">w2</text>
+        <text x="122" y="123" text-anchor="middle" font-size="10" fill="#fff">w3</text>
+        <text x="164" y="123" text-anchor="middle" font-size="10" fill="#fff">w4</text>
+      </g>
+
+      <!-- chaotic arrows -->
+      <g stroke="#f7657c" stroke-opacity=".5" stroke-width="1">
+        <line x1="60"  y1="72" x2="38"  y2="98"/>
+        <line x1="80"  y1="72" x2="80"  y2="98"/>
+        <line x1="100" y1="72" x2="122" y2="98"/>
+        <line x1="120" y1="72" x2="164" y2="98"/>
+        <line x1="140" y1="72" x2="80"  y2="98" stroke-dasharray="2,2"/>
+        <line x1="40"  y1="72" x2="122" y2="98" stroke-dasharray="2,2"/>
+      </g>
+
+      <!-- lock contention -->
+      <rect x="20" y="155" width="170" height="60" rx="6" fill="#1c1014" stroke="#f7657c" stroke-opacity=".5"/>
+      <text x="105" y="178" text-anchor="middle" font-size="11" fill="#f7657c">⚠ lock contention</text>
+      <text x="105" y="196" text-anchor="middle" font-size="10" class="svg-dim">127 of 128 retries</text>
+      <text x="105" y="210" text-anchor="middle" font-size="10" class="svg-dim">wasted CPU</text>
+
+      <text x="20" y="248" font-size="11" class="svg-faint">Throughput: capped by collision rate</text>
+      <text x="20" y="264" font-size="11" class="svg-faint">Priority order: not preserved</text>
+
+      <!-- divider -->
+      <line x1="360" y1="20" x2="360" y2="270" stroke="#222837" stroke-dasharray="2,4"/>
+
+      <!-- New side -->
+      <text x="400" y="22" font-size="12" font-weight="600" fill="#14f195">CENTRAL SCHEDULER: dedicated dispatcher</text>
+
+      <!-- scheduler thread -->
+      <rect x="400" y="34" width="200" height="36" rx="6" fill="#0d2118" stroke="#14f195" stroke-opacity=".7"/>
+      <text x="500" y="58" text-anchor="middle" font-size="12" fill="#fff">scheduler (prio-graph)</text>
+
+      <!-- private channels -->
+      <g stroke="#14f195" stroke-opacity=".6" stroke-width="1.2">
+        <line x1="430" y1="72" x2="430" y2="98"/>
+        <line x1="475" y1="72" x2="475" y2="98"/>
+        <line x1="525" y1="72" x2="525" y2="98"/>
+        <line x1="570" y1="72" x2="570" y2="98"/>
+      </g>
+
+      <!-- workers -->
+      <g>
+        <rect x="412" y="100" width="36" height="36" rx="4" fill="#0d2118" stroke="#14f195" stroke-opacity=".5"/>
+        <rect x="457" y="100" width="36" height="36" rx="4" fill="#0d2118" stroke="#14f195" stroke-opacity=".5"/>
+        <rect x="507" y="100" width="36" height="36" rx="4" fill="#0d2118" stroke="#14f195" stroke-opacity=".5"/>
+        <rect x="552" y="100" width="36" height="36" rx="4" fill="#0d2118" stroke="#14f195" stroke-opacity=".5"/>
+        <text x="430" y="123" text-anchor="middle" font-size="10" fill="#fff">w1</text>
+        <text x="475" y="123" text-anchor="middle" font-size="10" fill="#fff">w2</text>
+        <text x="525" y="123" text-anchor="middle" font-size="10" fill="#fff">w3</text>
+        <text x="570" y="123" text-anchor="middle" font-size="10" fill="#fff">w4</text>
+      </g>
+
+      <rect x="400" y="155" width="200" height="60" rx="6" fill="#0d2118" stroke="#14f195" stroke-opacity=".5"/>
+      <text x="500" y="178" text-anchor="middle" font-size="11" fill="#14f195">✓ guaranteed conflict-free</text>
+      <text x="500" y="196" text-anchor="middle" font-size="10" class="svg-dim">workers never fail a lock</text>
+      <text x="500" y="210" text-anchor="middle" font-size="10" class="svg-dim">strict priority order kept</text>
+
+      <text x="400" y="248" font-size="11" class="svg-faint">Throughput: bounded only by CU + slot time</text>
+      <text x="400" y="264" font-size="11" class="svg-faint">+80% fees / block (measured)</text>
+    </svg>
+    <div class="caption">Why Anza's central scheduler refactor was a Solana economics event, not just a code cleanup. Firedancer's <code>pack tile</code> is the same idea executed in a tiled C process model.</div>
+  </div>
+
+  <h3>The priority formula change</h3>
+  <p>v1.18 also fixed a perverse incentive in how priority was computed:</p>
+  <pre><code>OLD:  priority = priority_fee / CU_requested
+NEW:  priority = ((priority_fee × CU_requested) + base_fee) / (1 + CU_requested)</code></pre>
+  <p>The old formula let you inflate your effective priority by claiming you needed huge CU without paying proportionally. The new one ties the priority score to <em>actual compute committed</em>.</p>
+
+  <div class="callout insight">
+    <span class="label">★ Cohort-relevant insight</span>
+    <p>Firedancer's <strong>pack tile</strong> uses fast bitsets instead of a prio-graph for conflict detection — order-of-magnitude faster under burst load — and follows the <strong>Goldilocks rules</strong>: don't pack too fast (you miss higher-fee txs arriving later in the slot), don't pack too slow (you leave space empty), and dynamically adjust parallelism based on remaining slot time. Worth referencing if the speaker compares schedulers.</p>
+  </div>
+
+  <hr>
+
+  <!-- ============================================================= -->
+  <h2 id="s5"><span class="num">05</span>Account Locks &amp; Hot Accounts</h2>
+  <p class="sub">Why a popular AMM pool can serialize the world.</p>
+
+  <p>Every Solana transaction declares its account access upfront — <code>{pubkey, is_writable}</code>. The scheduler reads this <em>before</em> executing anything and uses it to build conflict-free batches.</p>
+
+  <div class="table-wrap">
+    <table>
+      <tr><th>Access pattern</th><th>Can run in parallel?</th></tr>
+      <tr><td>Two txs both <em>read</em> account A</td><td><span style="color:var(--accent-2)">✓ yes</span></td></tr>
+      <tr><td>One <em>writes</em> A, another <em>reads</em> A</td><td><span style="color:var(--accent-red)">✗ no — serialized</span></td></tr>
+      <tr><td>Two txs both <em>write</em> A</td><td><span style="color:var(--accent-red)">✗ no — serialized</span></td></tr>
+    </table>
+  </div>
+
+  <div class="diagram">
+    <svg viewBox="0 0 760 200" width="760">
+      <!-- parallel side -->
+      <text x="20" y="22" font-size="12" font-weight="600" fill="#14f195">Disjoint accounts → parallel</text>
+      <g>
+        <rect x="20"  y="40" width="80" height="36" rx="6" fill="#0d2118" stroke="#14f195" stroke-opacity=".5"/>
+        <rect x="20"  y="84" width="80" height="36" rx="6" fill="#0d2118" stroke="#14f195" stroke-opacity=".5"/>
+        <rect x="20"  y="128" width="80" height="36" rx="6" fill="#0d2118" stroke="#14f195" stroke-opacity=".5"/>
+        <text x="60" y="63" text-anchor="middle" font-size="11" fill="#fff">tx → A,B</text>
+        <text x="60" y="107" text-anchor="middle" font-size="11" fill="#fff">tx → C,D</text>
+        <text x="60" y="151" text-anchor="middle" font-size="11" fill="#fff">tx → E,F</text>
+      </g>
+      <g stroke="#14f195" stroke-opacity=".5" stroke-width="1.5">
+        <line x1="105" y1="58"  x2="170" y2="58"/>
+        <line x1="105" y1="102" x2="170" y2="102"/>
+        <line x1="105" y1="146" x2="170" y2="146"/>
+      </g>
+      <g>
+        <rect x="170" y="40"  width="60" height="36" rx="4" fill="#0d2118" stroke="#14f195" stroke-opacity=".4"/>
+        <rect x="170" y="84"  width="60" height="36" rx="4" fill="#0d2118" stroke="#14f195" stroke-opacity=".4"/>
+        <rect x="170" y="128" width="60" height="36" rx="4" fill="#0d2118" stroke="#14f195" stroke-opacity=".4"/>
+        <text x="200" y="63"  text-anchor="middle" font-size="10" fill="#fff">w1</text>
+        <text x="200" y="107" text-anchor="middle" font-size="10" fill="#fff">w2</text>
+        <text x="200" y="151" text-anchor="middle" font-size="10" fill="#fff">w3</text>
+      </g>
+      <text x="125" y="184" font-size="11" class="svg-faint" text-anchor="middle">3 threads, 3× throughput</text>
+
+      <line x1="380" y1="20" x2="380" y2="190" stroke="#222837" stroke-dasharray="2,4"/>
+
+      <!-- hot account side -->
+      <text x="420" y="22" font-size="12" font-weight="600" fill="#f7657c">Hot account → serialized</text>
+      <g>
+        <rect x="420" y="40"  width="100" height="36" rx="6" fill="#1c1014" stroke="#f7657c" stroke-opacity=".5"/>
+        <rect x="420" y="84"  width="100" height="36" rx="6" fill="#1c1014" stroke="#f7657c" stroke-opacity=".5"/>
+        <rect x="420" y="128" width="100" height="36" rx="6" fill="#1c1014" stroke="#f7657c" stroke-opacity=".5"/>
+        <text x="470" y="63"  text-anchor="middle" font-size="11" fill="#fff">tx → POOL</text>
+        <text x="470" y="107" text-anchor="middle" font-size="11" fill="#fff">tx → POOL</text>
+        <text x="470" y="151" text-anchor="middle" font-size="11" fill="#fff">tx → POOL</text>
+      </g>
+      <g stroke="#f7657c" stroke-opacity=".5" stroke-width="1.5">
+        <line x1="525" y1="58"  x2="590" y2="100"/>
+        <line x1="525" y1="102" x2="590" y2="100"/>
+        <line x1="525" y1="146" x2="590" y2="100"/>
+      </g>
+      <rect x="590" y="84" width="60" height="36" rx="4" fill="#1c1014" stroke="#f7657c" stroke-opacity=".4"/>
+      <text x="620" y="107" text-anchor="middle" font-size="10" fill="#fff">w1</text>
+      <text x="650" y="107" font-size="11" class="svg-dim">single thread</text>
+      <text x="555" y="184" font-size="11" class="svg-faint" text-anchor="middle">priority fee = ordering, not speed</text>
+    </svg>
+    <div class="caption">Hot accounts (Raydium pools, Pyth feeds, popular mint authorities) hard-serialize every conflicting tx onto one worker. No priority fee can break the throughput ceiling.</div>
+  </div>
+
+  <p>This is why Solana DEX devs ship state-sharded pools, why oracle architectures cache reads to a per-consumer account, and why <strong>SIMD-0110</strong> (exponential write-lock fees) exists. It is also why MEV bot operators care so much about which slot they hit — once a pool is contested, ordering inside that pool is single-threaded.</p>
+
+  <hr>
+
+  <!-- ============================================================= -->
+  <h2 id="s6"><span class="num">06</span>PoH + Block Limits</h2>
+  <p class="sub">Three hard ceilings that anyone building blocks must respect.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="v">400 ms</div><div class="k">slot time (hard)</div></div>
+    <div class="stat"><div class="v">60M CU</div><div class="k">block limit (SIMD-0256)</div></div>
+    <div class="stat"><div class="v">12M CU</div><div class="k">per writable account</div></div>
+    <div class="stat"><div class="v">1.4M CU</div><div class="k">per transaction max</div></div>
+  </div>
+
+  <p>PoH is a <strong>sequential SHA-256 hash chain</strong> running on a dedicated single thread as fast as the CPU allows. It is functionally a Verifiable Delay Function — not formally one, but sequentially preimage-resistant. Insert a tx hash into the chain at position N and the entire downstream chain depends on it; you can't retroactively reorder.</p>
+
+  <pre><code>hash[N+1] = SHA256(hash[N])                          # tick
+hash[N+1] = SHA256(hash[N] || SHA256(transactions))  # entry with txs</code></pre>
+
+  <p>One slot = 64 ticks (6.25ms each). The PoH thread doesn't wait for execution — if Banking falls behind, it just inserts empty ticks and the block ships partially full. <strong>There is no retry window inside the slot.</strong> Miss it, client resubmits.</p>
+
+  <div class="callout watch">
+    <span class="label">Number to double-check live</span>
+    <p>Most older docs still cite the <strong>48M CU</strong> block limit. SIMD-0256 raised it to <strong>60M</strong>. SIMD-0286 (proposed 100M) is under discussion. If the speaker quotes a number, this is the gotcha.</p>
+  </div>
+
+  <hr>
+
+  <!-- ============================================================= -->
+  <h2 id="s7"><span class="num">07</span>Ethereum PBS vs Solana</h2>
+  <p class="sub">Why this is the most-misunderstood structural difference in the conversation.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 780 260" width="780">
+      <!-- Ethereum side -->
+      <text x="20" y="22" font-size="12" font-weight="600" fill="#56b6ff">ETHEREUM (MEV-Boost / ePBS)</text>
+
+      <rect x="20" y="40"  width="110" height="40" rx="6" fill="#161a24" stroke="#56b6ff" stroke-opacity=".5"/>
+      <text x="75" y="64" text-anchor="middle" font-size="12" fill="#fff">Searchers</text>
+
+      <rect x="20" y="100" width="110" height="40" rx="6" fill="#161a24" stroke="#56b6ff" stroke-opacity=".5"/>
+      <text x="75" y="124" text-anchor="middle" font-size="12" fill="#fff">Builder 1..N</text>
+
+      <rect x="20" y="160" width="110" height="40" rx="6" fill="#161a24" stroke="#56b6ff" stroke-opacity=".5"/>
+      <text x="75" y="184" text-anchor="middle" font-size="12" fill="#fff">Relay</text>
+
+      <rect x="20" y="220" width="110" height="40" rx="6" fill="#1a1a30" stroke="#9945ff" stroke-opacity=".7"/>
+      <text x="75" y="244" text-anchor="middle" font-size="12" fill="#fff">Proposer</text>
+
+      <line x1="75" y1="80"  x2="75" y2="98"  stroke="#56b6ff" stroke-opacity=".5" stroke-width="1.5"/>
+      <line x1="75" y1="140" x2="75" y2="158" stroke="#56b6ff" stroke-opacity=".5" stroke-width="1.5"/>
+      <line x1="75" y1="200" x2="75" y2="218" stroke="#56b6ff" stroke-opacity=".5" stroke-width="1.5"/>
+
+      <text x="150" y="105" font-size="10" class="svg-dim">build full block</text>
+      <text x="150" y="165" font-size="10" class="svg-dim">forward header</text>
+      <text x="150" y="245" font-size="10" class="svg-dim">sign &amp; propose</text>
+
+      <text x="20" y="288" font-size="11" class="svg-faint">Roles formally separated. Proposer never sees tx contents.</text>
+
+      <!-- divider -->
+      <line x1="370" y1="20" x2="370" y2="295" stroke="#222837" stroke-dasharray="2,4"/>
+
+      <!-- Solana side -->
+      <text x="400" y="22" font-size="12" font-weight="600" fill="#9945ff">SOLANA (today)</text>
+
+      <rect x="400" y="40" width="110" height="40" rx="6" fill="#161a24" stroke="#56b6ff" stroke-opacity=".5"/>
+      <text x="455" y="64" text-anchor="middle" font-size="12" fill="#fff">Searchers</text>
+
+      <rect x="400" y="100" width="340" height="160" rx="10" fill="#1c1530" stroke="#9945ff" stroke-opacity=".8" stroke-width="1.5"/>
+      <text x="570" y="124" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">Leader (validator)</text>
+      <text x="570" y="142" text-anchor="middle" font-size="11" class="svg-dim">receives · schedules · executes · hashes · broadcasts</text>
+
+      <!-- nested boxes -->
+      <rect x="420" y="160" width="140" height="30" rx="4" fill="#0d1018" stroke="#9945ff" stroke-opacity=".4"/>
+      <text x="490" y="180" text-anchor="middle" font-size="11" fill="#fff">Banking Stage</text>
+
+      <rect x="580" y="160" width="140" height="30" rx="4" fill="#0d1018" stroke="#9945ff" stroke-opacity=".4"/>
+      <text x="650" y="180" text-anchor="middle" font-size="11" fill="#fff">PoH</text>
+
+      <rect x="420" y="205" width="300" height="40" rx="4" fill="#0d1018" stroke="#14f195" stroke-opacity=".4"/>
+      <text x="570" y="225" text-anchor="middle" font-size="11" fill="#fff">↑ overlay: Jito / Harmonic / BAM</text>
+      <text x="570" y="240" text-anchor="middle" font-size="10" class="svg-dim">influence Banking Stage via bundles + sidecars</text>
+
+      <line x1="455" y1="80" x2="455" y2="98" stroke="#56b6ff" stroke-opacity=".5" stroke-width="1.5"/>
+
+      <text x="400" y="288" font-size="11" class="svg-faint">No PBS interface. The leader does everything. Builders are integrations.</text>
+    </svg>
+    <div class="caption">The structural contrast that the entire Solana block-building industry is shaped by.</div>
+  </div>
+
+  <blockquote>
+    "On Ethereum: validators propose, builders construct. On Solana: the leader does everything."
+    <cite>— the single most useful one-liner for this lecture</cite>
+  </blockquote>
+
+  <hr>
+
+  <!-- ============================================================= -->
+  <h2 id="s8"><span class="num">08</span>Jito: The Incumbent</h2>
+  <p class="sub">~95% of stake runs the Jito-Solana client. Understanding it is non-negotiable for following the Harmonic pitch.</p>
+
+  <h3>What Jito-Solana actually is</h3>
+  <p>A fork of Agave with three extra stages bolted into the validator:</p>
+  <ul class="clean">
+    <li><strong>RelayerStage</strong> — intercepts TPU traffic before it hits Fetch</li>
+    <li><strong>BlockEngineStage</strong> — maintains a gRPC link to Jito's centralized auction service</li>
+    <li><strong>BundleStage</strong> — executes bundles atomically via <code>BundleAccountLocker</code> and writes them to PoH all-or-nothing</li>
+  </ul>
+
+  <div class="diagram">
+    <svg viewBox="0 0 780 320" width="780">
+      <defs>
+        <marker id="arrow2" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L9,3 z" fill="#56b6ff"/>
+        </marker>
+      </defs>
+
+      <!-- searchers -->
+      <rect x="30" y="30" width="140" height="50" rx="8" fill="#161a24" stroke="#56b6ff" stroke-opacity=".5"/>
+      <text x="100" y="55" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">Searchers</text>
+      <text x="100" y="72" text-anchor="middle" font-size="10" class="svg-dim">arb, liq, JIT, sandwich</text>
+
+      <!-- block engine -->
+      <line x1="170" y1="55" x2="220" y2="55" stroke="#56b6ff" stroke-width="1.5" marker-end="url(#arrow2)"/>
+      <text x="195" y="48" font-size="10" class="svg-dim" text-anchor="middle">bundle</text>
+      <text x="195" y="68" font-size="10" class="svg-dim" text-anchor="middle">+ tip</text>
+
+      <rect x="225" y="20" width="200" height="70" rx="10" fill="#1c1530" stroke="#9945ff" stroke-opacity=".8" stroke-width="1.5"/>
+      <text x="325" y="46" text-anchor="middle" font-size="14" fill="#fff" font-weight="600">Jito Block Engine</text>
+      <text x="325" y="64" text-anchor="middle" font-size="10" class="svg-purple">centralized · 3 regions</text>
+      <text x="325" y="78" text-anchor="middle" font-size="10" class="svg-dim">auction by tip/CU, 200ms ticks</text>
+
+      <!-- relayer -->
+      <line x1="425" y1="55" x2="475" y2="55" stroke="#56b6ff" stroke-width="1.5" marker-end="url(#arrow2)"/>
+      <rect x="480" y="20" width="160" height="70" rx="10" fill="#161a24" stroke="#56b6ff" stroke-opacity=".5"/>
+      <text x="560" y="46" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">Relayer</text>
+      <text x="560" y="64" text-anchor="middle" font-size="10" class="svg-dim">TPU proxy</text>
+      <text x="560" y="78" text-anchor="middle" font-size="10" class="svg-dim">200ms hold = pseudo-mempool</text>
+
+      <!-- validator -->
+      <line x1="560" y1="92" x2="560" y2="130" stroke="#56b6ff" stroke-width="1.5" marker-end="url(#arrow2)"/>
+
+      <rect x="160" y="140" width="480" height="120" rx="10" fill="#161a24" stroke="#9945ff" stroke-opacity=".6"/>
+      <text x="400" y="166" text-anchor="middle" font-size="14" fill="#fff" font-weight="600">Jito-Solana Validator</text>
+
+      <rect x="180" y="180" width="130" height="60" rx="6" fill="#0d1018" stroke="#9945ff" stroke-opacity=".4"/>
+      <text x="245" y="204" text-anchor="middle" font-size="12" fill="#fff">BundleStage</text>
+      <text x="245" y="220" text-anchor="middle" font-size="10" class="svg-purple">atomic, ≤5 tx</text>
+      <text x="245" y="234" text-anchor="middle" font-size="10" class="svg-dim">≤80% slot reserved</text>
+
+      <rect x="330" y="180" width="130" height="60" rx="6" fill="#0d1018" stroke="#56b6ff" stroke-opacity=".4"/>
+      <text x="395" y="204" text-anchor="middle" font-size="12" fill="#fff">Banking Stage</text>
+      <text x="395" y="220" text-anchor="middle" font-size="10" class="svg-dim">regular txs</text>
+      <text x="395" y="234" text-anchor="middle" font-size="10" class="svg-dim">central scheduler</text>
+
+      <rect x="480" y="180" width="140" height="60" rx="6" fill="#0d1018" stroke="#14f195" stroke-opacity=".4"/>
+      <text x="550" y="204" text-anchor="middle" font-size="12" fill="#fff">PoH + Broadcast</text>
+      <text x="550" y="220" text-anchor="middle" font-size="10" class="svg-dim">tips → tip PDAs</text>
+      <text x="550" y="234" text-anchor="middle" font-size="10" class="svg-dim">→ TipRouter NCN</text>
+
+      <line x1="310" y1="210" x2="330" y2="210" stroke="#56b6ff" stroke-opacity=".4"/>
+      <line x1="460" y1="210" x2="480" y2="210" stroke="#56b6ff" stroke-opacity=".4"/>
+
+      <!-- shredstream callout -->
+      <rect x="180" y="280" width="440" height="30" rx="6" fill="#0d1018" stroke="#ffb454" stroke-opacity=".5"/>
+      <text x="400" y="300" text-anchor="middle" font-size="11" fill="#ffb454">→ ShredStream: low-latency shred delivery to whitelisted searchers (UDP 20000)</text>
+    </svg>
+    <div class="caption">The Jito stack. Block engine is centralized and Jito-operated; relayer can be validator-local but most use Jito's hosted version.</div>
+  </div>
+
+  <h3>Bundles</h3>
+  <p>A bundle is <strong>up to 5 transactions, atomic, same-slot, strict order</strong>. It includes a transfer to one of 8 static <strong>tip PDAs</strong>. The block engine ranks competing bundles by <strong>tip-per-CU</strong>, not absolute tip. <code>getTipAccounts</code> returns the live PDA set.</p>
+
+  <h3>ShredStream</h3>
+  <p>Skips Turbine's multi-hop tree by proxying shreds directly from the leader to whitelisted subscribers. Saves "hundreds of milliseconds" for co-located HFT operators. Access-gated via Jito Discord whitelisting and an open UDP port — this gate is where the "stake-weighted" privilege materializes for sophisticated searchers.</p>
+
+  <h3>Where the tip actually goes</h3>
+  <ul class="clean">
+    <li>~95–97% → the block-producing validator (split with stakers per their MEV commission)</li>
+    <li>2.7% → Jito DAO treasury (via TipRouter)</li>
+    <li>0.3% → TipRouter NCN operators</li>
+  </ul>
+
+  <div class="callout insight">
+    <span class="label">★ Why validators all opted in</span>
+    <p>Pre-Jito, a validator's APY to delegators was ~6–7%. Post-Jito, aggressive participation puts it at 8–10%. That delta compounds into stake migration — over 18 months, Jito-Solana went from 48% to 95% of active stake. Block-building infrastructure became <em>the</em> competitive moat in validator economics. <strong>This is the structural force every later player has to displace or coexist with.</strong></p>
+  </div>
+
+  <hr>
+
+  <!-- ============================================================= -->
+  <h2 id="s9"><span class="num">09</span>The MEV Landscape on Solana</h2>
+  <p class="sub">What kinds of MEV exist, which ones are net-positive, and which ones drove the Jito mempool shutdown drama.</p>
+
+  <div class="table-wrap">
+    <table>
+      <tr><th style="width:130px">Category</th><th>What it is</th><th>Net to users?</th></tr>
+      <tr><td><strong>Atomic arb</strong></td><td>Close cross-DEX price gaps in a single tx, no exec risk. ~90M txs/year, $142M/year profit.</td><td><span style="color:var(--accent-2)">+ tightens spreads</span></td></tr>
+      <tr><td><strong>Backrun</strong></td><td>Submit a tx right after an observed big swap to capture the rebound. Bundle order: anchor + backrun.</td><td><span style="color:var(--text-dim)">neutral</span></td></tr>
+      <tr><td><strong>Sandwich</strong></td><td>Frontrun → victim swap → backrun. Needs pre-execution visibility (the 200ms relayer window or a private mempool).</td><td><span style="color:var(--accent-red)">− pure user loss</span></td></tr>
+      <tr><td><strong>JIT liquidity</strong></td><td>Add LP right before a big swap, remove right after. Captures fees from passive LPs.</td><td><span style="color:var(--text-dim)">user-neutral, LP-negative</span></td></tr>
+      <tr><td><strong>Liquidations</strong></td><td>Race to close undercollateralized positions on Kamino/MarginFi/Mango.</td><td><span style="color:var(--accent-2)">+ protocol solvency</span></td></tr>
+      <tr><td><strong>Failed-tx spam</strong></td><td>Pre-fix era: 75.7% of non-vote txs were failed arb attempts. Down to ~30% after deterministic scheduler.</td><td><span style="color:var(--accent-red)">− network noise</span></td></tr>
+    </table>
+  </div>
+
+  <h3>The mempool drama (March 2024)</h3>
+  <p>Jito shut down its public mempool after sandwich extraction crossed $500M lifetime. The fight that ensued:</p>
+  <ul class="clean">
+    <li><strong>Jito's position:</strong> sandwiching was a pure negative externality; shutting down the public mempool was a public good.</li>
+    <li><strong>Mert / Charbonneau et al.:</strong> a centralized operator unilaterally redefined the market. Sandwich activity didn't stop — it moved to opaque private mempools (DeezNode) where validators take 50% of sandwich profits.</li>
+    <li><strong>Outcome:</strong> "wide sandwich" attacks (50–300ms gaps, exploiting the relayer delay rather than tight bundle ordering) increased ~30×.</li>
+  </ul>
+
+  <p>This is the political backdrop to <strong>Harmonic's "open block building"</strong> framing. If you can't trust a single operator to censor toxic MEV correctly, the answer (Harmonic argues) is to let validators choose between competing builders with different policies.</p>
+
+  <hr>
+
+  <!-- ============================================================= -->
+  <h2 id="s10"><span class="num">10</span>Harmonic: The Multi-Builder Marketplace</h2>
+  <p class="sub">Paradigm-backed, $6M seed, NYC ~10 people, spun out of Temporal (the team behind Nozomi and HumidiFi). Live since November 2025.</p>
+
+  <h3>The thesis in one paragraph</h3>
+  <p>Validators today have one practical block-building partner: Jito. That's a single point of failure, a single auction operator with full visibility into every searcher's strategy, a single MEV philosophy imposed on every block. Harmonic's pitch: <strong>let many builders compete; let the validator pick.</strong></p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 780 360" width="780">
+      <defs>
+        <marker id="arrow3" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L9,3 z" fill="#9945ff"/>
+        </marker>
+      </defs>
+
+      <!-- searchers -->
+      <rect x="30" y="20" width="140" height="50" rx="8" fill="#161a24" stroke="#56b6ff" stroke-opacity=".5"/>
+      <text x="100" y="44" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">Searchers</text>
+      <text x="100" y="60" text-anchor="middle" font-size="10" class="svg-dim">submit to multiple builders</text>
+
+      <!-- builder column -->
+      <text x="290" y="14" font-size="10" class="svg-faint" letter-spacing="1.5" text-anchor="middle">INDEPENDENT BUILDERS</text>
+      <rect x="220" y="20"  width="140" height="40" rx="6" fill="#1c1530" stroke="#9945ff" stroke-opacity=".5"/>
+      <text x="290" y="44"  text-anchor="middle" font-size="12" fill="#fff">Temporal builder</text>
+
+      <rect x="220" y="68"  width="140" height="40" rx="6" fill="#1c1530" stroke="#9945ff" stroke-opacity=".5"/>
+      <text x="290" y="92"  text-anchor="middle" font-size="12" fill="#fff">Jito BAM</text>
+
+      <rect x="220" y="116" width="140" height="40" rx="6" fill="#1c1530" stroke="#9945ff" stroke-opacity=".5"/>
+      <text x="290" y="140" text-anchor="middle" font-size="12" fill="#fff">Paladin</text>
+
+      <rect x="220" y="164" width="140" height="40" rx="6" fill="#1c1530" stroke="#9945ff" stroke-opacity=".5"/>
+      <text x="290" y="188" text-anchor="middle" font-size="12" fill="#fff">Jito (regular)</text>
+
+      <rect x="220" y="212" width="140" height="40" rx="6" fill="#1c1530" stroke="#9945ff" stroke-opacity=".3" stroke-dasharray="3,3"/>
+      <text x="290" y="236" text-anchor="middle" font-size="12" class="svg-dim">future builder N…</text>
+
+      <line x1="170" y1="44" x2="218" y2="44" stroke="#56b6ff" stroke-opacity=".5" stroke-width="1.5"/>
+      <line x1="170" y1="44" x2="218" y2="88" stroke="#56b6ff" stroke-opacity=".4" stroke-width="1"/>
+      <line x1="170" y1="44" x2="218" y2="136" stroke="#56b6ff" stroke-opacity=".4" stroke-width="1"/>
+      <line x1="170" y1="44" x2="218" y2="184" stroke="#56b6ff" stroke-opacity=".4" stroke-width="1"/>
+
+      <!-- engine -->
+      <line x1="360" y1="44"  x2="430" y2="120" stroke="#9945ff" stroke-opacity=".5" stroke-width="1.5"/>
+      <line x1="360" y1="88"  x2="430" y2="120" stroke="#9945ff" stroke-opacity=".5" stroke-width="1.5"/>
+      <line x1="360" y1="136" x2="430" y2="140" stroke="#9945ff" stroke-opacity=".5" stroke-width="1.5"/>
+      <line x1="360" y1="184" x2="430" y2="140" stroke="#9945ff" stroke-opacity=".5" stroke-width="1.5"/>
+
+      <rect x="430" y="80" width="180" height="100" rx="10" fill="#1c1530" stroke="#9945ff" stroke-opacity=".9" stroke-width="2"/>
+      <text x="520" y="108" text-anchor="middle" font-size="14" fill="#fff" font-weight="600">Harmonic Engine</text>
+      <text x="520" y="128" text-anchor="middle" font-size="10" class="svg-purple">aggregate · verify · score</text>
+      <text x="520" y="146" text-anchor="middle" font-size="10" class="svg-dim">50 ms microblock auction</text>
+      <text x="520" y="162" text-anchor="middle" font-size="10" class="svg-dim">claim: ~1M tx/s sequencing</text>
+
+      <!-- validator -->
+      <line x1="610" y1="130" x2="660" y2="130" stroke="#9945ff" stroke-width="1.5" marker-end="url(#arrow3)"/>
+      <rect x="660" y="90" width="110" height="80" rx="8" fill="#161a24" stroke="#14f195" stroke-opacity=".5"/>
+      <text x="715" y="116" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">Validator</text>
+      <text x="715" y="134" text-anchor="middle" font-size="10" class="svg-dim">harmonic/proposer</text>
+      <text x="715" y="148" text-anchor="middle" font-size="10" class="svg-dim">applies policy →</text>
+      <text x="715" y="162" text-anchor="middle" font-size="10" class="svg-dim">selects best block</text>
+
+      <!-- policy box -->
+      <rect x="430" y="220" width="340" height="120" rx="10" fill="#161a24" stroke="#14f195" stroke-opacity=".4"/>
+      <text x="600" y="244" text-anchor="middle" font-size="12" fill="#fff" font-weight="600">Validator policy knobs</text>
+      <text x="450" y="266" font-size="11" class="svg-dim">▸ revenue maximization</text>
+      <text x="450" y="284" font-size="11" class="svg-dim">▸ MEV / toxicity filtering</text>
+      <text x="450" y="302" font-size="11" class="svg-dim">▸ content rules (allow / deny lists)</text>
+      <text x="450" y="320" font-size="11" class="svg-dim">▸ application prioritization (perps MMs etc.)</text>
+
+      <!-- fallback -->
+      <rect x="30" y="280" width="340" height="60" rx="8" fill="#0d1018" stroke="#ffb454" stroke-opacity=".5"/>
+      <text x="200" y="304" text-anchor="middle" font-size="11" fill="#ffb454">⚠ fallback: if engine fails, validator builds its own block</text>
+      <text x="200" y="322" text-anchor="middle" font-size="10" class="svg-dim">leaders never lose control</text>
+    </svg>
+    <div class="caption">Harmonic's architecture. The engine is centralized (today operated by Temporal), but the builders feeding it are independent. Validators retain final selection.</div>
+  </div>
+
+  <h3>What the validator actually installs</h3>
+  <p>A component called <code>harmonic/proposer</code>, marketed as a "drop-in client" that runs alongside an existing Agave validator. <strong>Whether it's a sidecar process or a forked client binary is not fully spelled out in public docs</strong> — good question for the speaker. Onboarding requires manual whitelisting + a "builder binding" applied by the Harmonic team.</p>
+
+  <h3>Harmonic Bundles vs Jito Bundles</h3>
+  <div class="table-wrap">
+    <table>
+      <tr><th></th><th>Jito Bundles</th><th>Harmonic Bundles</th></tr>
+      <tr><td>gRPC interface</td><td>Custom <code>jito-protos</code></td><td>gRPC-compatible with <code>jito-protos</code> (easy migrate)</td></tr>
+      <tr><td>Auth role</td><td>Standard searcher</td><td><code>ShreadStreamSubscriber</code> (=3)</td></tr>
+      <tr><td>Access</td><td>Permissionless</td><td><strong>Whitelist gated</strong> (closed beta)</td></tr>
+      <tr><td>Tip mechanism</td><td>Transfer to 1 of 8 tip PDAs</td><td>Standard priority fee — no separate transfer ix</td></tr>
+      <tr><td>Effective fee delta</td><td>Pays 3% TipRouter cut</td><td>~6% less tip needed for equivalent ranking</td></tr>
+      <tr><td>Atomicity</td><td>All-or-nothing, ≤5 tx</td><td>[UNVERIFIED — depends on individual builder]</td></tr>
+    </table>
+  </div>
+
+  <h3>The latency tradeoff</h3>
+  <p>The most contested fact in the entire space:</p>
+  <div class="stats">
+    <div class="stat"><div class="v">+76%</div><div class="k">revenue vs median validator (Mar 2026)</div></div>
+    <div class="stat"><div class="v">618ms</div><div class="k">avg block time vs 400ms target</div></div>
+    <div class="stat"><div class="v">16.8%</div><div class="k">stake share (Feb 2026, from 3.2% in Nov)</div></div>
+    <div class="stat"><div class="v">45</div><div class="k">validators (Feb 2026)</div></div>
+  </div>
+
+  <p>Jito launched their IBRL Explorer in January 2026 specifically to highlight what they called Harmonic's "late packing" — transactions clustered at the end of slots, evidence of delayed state propagation. Harmonic's counter: blocks <em>look</em> late-packed because the 50ms microblock auction resolves at final ticks; the right metric is throughput per slot, not packing distribution. <strong>Expect this to come up.</strong></p>
+
+  <div class="callout warn">
+    <span class="label">⚠ The vertical-integration question</span>
+    <p>Harmonic is operated by Temporal, which <em>also</em> runs <strong>Nozomi</strong> (a tx-landing service) and <strong>HumidiFi</strong> (a market-making DEX that processed ~60% of Solana spot volume at peak). Independent research (Blockworks) found HumidiFi's oracle-update win rate was <strong>73% on Harmonic validators vs 37–52% elsewhere</strong> in the period before late January 2026. Harmonic says that advantage has since disappeared. This is the sharpest critique of the project and worth raising thoughtfully if the speaker doesn't address it.</p>
+  </div>
+
+  <hr>
+
+  <!-- ============================================================= -->
+  <h2 id="s11"><span class="num">11</span>Jito vs Harmonic — At a Glance</h2>
+
+  <div class="table-wrap">
+    <table>
+      <tr><th></th><th>Jito</th><th>Harmonic</th></tr>
+      <tr><td>Builders</td><td>1 (Jito Block Engine)</td><td>N (Temporal, BAM, Paladin, Jito as one of many)</td></tr>
+      <tr><td>Validator choice</td><td>Take Jito's block or skip MEV</td><td>Per-slot menu, configurable policy</td></tr>
+      <tr><td>Auction</td><td>200ms ticks, tip/CU ranking</td><td>50ms microblock auctions</td></tr>
+      <tr><td>Validator client</td><td>Jito-Solana fork of Agave</td><td>Sidecar/drop-in alongside Agave</td></tr>
+      <tr><td>Stake share (early 2026)</td><td>~95% client adoption</td><td>~16.8% bound to Harmonic engine</td></tr>
+      <tr><td>Bundle access</td><td>Permissionless</td><td>Whitelist (closed beta)</td></tr>
+      <tr><td>Protocol fee</td><td>3% (2.7% DAO + 0.3% NCN)</td><td>0% on tips; business model undisclosed</td></tr>
+      <tr><td>Transparency tools</td><td>IBRL Explorer (Jan 2026)</td><td>Dissonance explorer</td></tr>
+      <tr><td>Conflict-of-interest profile</td><td>Operates JitoSOL + bundle auction</td><td>Operated by Temporal, which also runs HumidiFi (DEX) and Nozomi</td></tr>
+      <tr><td>Block latency</td><td>362ms continuation (BAM baseline)</td><td>407–534ms continuation/handoff</td></tr>
+    </table>
+  </div>
+
+  <hr>
+
+  <!-- ============================================================= -->
+  <h2 id="s12"><span class="num">12</span>The Protocol Roadmap</h2>
+  <p class="sub">What Alpenglow, APE, and Constellation do to the block-building market. The forward-looking part of the lecture lives here.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 780 260" width="780">
+      <line x1="40" y1="120" x2="740" y2="120" stroke="#222837" stroke-width="2"/>
+
+      <!-- markers -->
+      <g>
+        <circle cx="80"  cy="120" r="8" fill="#14f195"/>
+        <text x="80"  y="100" text-anchor="middle" font-size="11" class="svg-mono svg-dim">NOW</text>
+        <text x="80"  y="148" text-anchor="middle" font-size="12" fill="#fff" font-weight="600">Today</text>
+        <text x="80"  y="166" text-anchor="middle" font-size="10" class="svg-dim">Agave 2.3 / 3.1</text>
+        <text x="80"  y="180" text-anchor="middle" font-size="10" class="svg-dim">Frankendancer 26%</text>
+        <text x="80"  y="194" text-anchor="middle" font-size="10" class="svg-dim">Jito + Harmonic + BAM</text>
+      </g>
+
+      <g>
+        <circle cx="240" cy="120" r="8" fill="#56b6ff"/>
+        <text x="240" y="100" text-anchor="middle" font-size="11" class="svg-mono svg-dim">Q3 2026</text>
+        <text x="240" y="148" text-anchor="middle" font-size="12" fill="#fff" font-weight="600">Alpenglow</text>
+        <text x="240" y="166" text-anchor="middle" font-size="10" class="svg-dim">Votor → 100-150ms</text>
+        <text x="240" y="180" text-anchor="middle" font-size="10" class="svg-dim">votes off-chain (BLS)</text>
+        <text x="240" y="194" text-anchor="middle" font-size="10" class="svg-dim">PoH-as-clock retired</text>
+      </g>
+
+      <g>
+        <circle cx="400" cy="120" r="8" fill="#56b6ff"/>
+        <text x="400" y="100" text-anchor="middle" font-size="11" class="svg-mono svg-dim">LATE 2026</text>
+        <text x="400" y="148" text-anchor="middle" font-size="12" fill="#fff" font-weight="600">Rotor + Constellation</text>
+        <text x="400" y="166" text-anchor="middle" font-size="10" class="svg-dim">single-hop shred propagation</text>
+        <text x="400" y="180" text-anchor="middle" font-size="10" class="svg-dim">50ms economic cycle</text>
+        <text x="400" y="194" text-anchor="middle" font-size="10" class="svg-dim">attester-enforced inclusion</text>
+      </g>
+
+      <g>
+        <circle cx="560" cy="120" r="8" fill="#9945ff"/>
+        <text x="560" y="100" text-anchor="middle" font-size="11" class="svg-mono svg-dim">2027+</text>
+        <text x="560" y="148" text-anchor="middle" font-size="12" fill="#fff" font-weight="600">APE</text>
+        <text x="560" y="166" text-anchor="middle" font-size="10" class="svg-dim">async program execution</text>
+        <text x="560" y="180" text-anchor="middle" font-size="10" class="svg-dim">block = ordering commit</text>
+        <text x="560" y="194" text-anchor="middle" font-size="10" class="svg-dim">UserBlockSlots = formal builders</text>
+      </g>
+
+      <g>
+        <circle cx="700" cy="120" r="8" fill="#9945ff"/>
+        <text x="700" y="100" text-anchor="middle" font-size="11" class="svg-mono svg-dim">2027+</text>
+        <text x="700" y="148" text-anchor="middle" font-size="12" fill="#fff" font-weight="600">ACE</text>
+        <text x="700" y="166" text-anchor="middle" font-size="10" class="svg-dim">app-controlled exec</text>
+        <text x="700" y="180" text-anchor="middle" font-size="10" class="svg-dim">contracts dictate order</text>
+      </g>
+
+      <text x="40" y="240" font-size="11" class="svg-faint">Each step makes block production faster, more protocol-constrained, and changes what off-validator builders can sell.</text>
+    </svg>
+    <div class="caption">The roadmap that turns every "what about X?" question in the Q&A into a forward-looking discussion.</div>
+  </div>
+
+  <h3>Alpenglow <span class="tag soon">Q3 2026</span></h3>
+  <p>Replaces TowerBFT with <strong>Votor</strong> (two-path BLS-aggregated voting: ≥80% stake → 100ms finality, ≥60% → 150ms) and Turbine with <strong>Rotor</strong> (single-hop shred propagation, ships separately). Votes go off-chain, freeing ~75% of ledger bandwidth. Leader rotation itself does <em>not</em> change.</p>
+  <p>For block builders: the finality window shrinks from 12.8s to ~150ms. <strong>Dark MEV (timing manipulation within a leader slot) becomes much more expensive</strong> because early-slot delays are penalized harder than late ones.</p>
+
+  <h3>APE — Async Program Execution <span class="tag later">2027+</span></h3>
+  <p>Separates consensus from execution. The block becomes a <strong>pure ordering commitment</strong> — leaders seal ordering without knowing execution outcomes. Two domains:</p>
+  <ul class="clean">
+    <li><strong>Vote Execution Domain (VED)</strong> — fast lane: <code>VoteProgram</code>, <code>SystemProgram</code>, fee payers. Leader executes immediately.</li>
+    <li><strong>User Execution Domain (UED)</strong> — slow lane: all DeFi, NFTs, games. Executed by validators on the heaviest fork only.</li>
+  </ul>
+  <p>Crucially, APE introduces <strong>formal builders</strong> via <code>UserBlockSlots</code> — staked nodes separate from leaders who construct non-vote UserBlocks. Default 2 per regular slot. <strong>This is the layer Harmonic is built for.</strong> If APE ships, Harmonic's "aggregate competing builders" model goes from useful overlay to native protocol fit.</p>
+
+  <h3>Constellation (MCP / MCL) <span class="tag later">Late 2026 — 2027</span></h3>
+  <p>Adds two new roles on top of Alpenglow: ~16 <strong>Proposers</strong> on a 50ms cycle and 256 <strong>Attesters</strong>. Any pslice attested by ≥40% of attesters <em>must</em> be included by the leader, or the block is cryptographically invalid. Hard censorship resistance enforced at the protocol layer.</p>
+  <p>Fee restructure: ordering (priority) fees go to <strong>all validators by stake weight</strong>, not just the leader. This compresses the exclusive MEV advantage current Jito-optimized validators hold.</p>
+
+  <h3>Firedancer <span class="tag live">Live, expanding</span></h3>
+  <p>Frankendancer (Firedancer networking + Agave runtime) at ~26% stake, zero consensus divergence over 50k+ blocks. Full Firedancer producing mainnet blocks since Oct 2025, ~5% stake. Provides true client diversity and the deterministic sub-millisecond block construction latency that Rotor needs. The pack tile already implements Goldilocks-style block packing.</p>
+
+  <hr>
+
+  <!-- ============================================================= -->
+  <h2 id="s13"><span class="num">13</span>Future of Off-Validator Block Building</h2>
+  <p class="sub">If APE + Constellation + ACE all ship, what survives for Jito and Harmonic?</p>
+
+  <div class="compare">
+    <div>
+      <h4 style="color:var(--accent-2)">⊕ Bull case (Harmonic survives + grows)</h4>
+      <ul class="clean">
+        <li>APE creates a formal builder market — Harmonic IS the aggregation layer for that market</li>
+        <li>Constellation removes proximity advantage → builders compete on quality, not just latency</li>
+        <li>Searchers still need order-flow routing; protocol-level inclusion doesn't pick the best builder</li>
+        <li>Builder specialization (perps, arb, NFT mints) keeps the marketplace useful</li>
+        <li>TEE / ACE proxies (BAM-style) fill the gap until protocol-level ACE ships in 2027+</li>
+      </ul>
+    </div>
+    <div class="vs">
+      <h4 style="color:var(--accent-red)">⊖ Bear case (absorbed into the protocol)</h4>
+      <ul class="clean">
+        <li>If Constellation + APE + ACE all land, the distinct "block building" layer collapses into protocol roles</li>
+        <li>Stake-weighted inclusion guarantees remove the need for tip-based censorship workarounds</li>
+        <li>App-owned sequencing (ACE) moves ordering control to the smart contract, not the builder</li>
+        <li>Harmonic narrows to a thin builder-aggregation/preference-tooling layer</li>
+        <li>Jito's moat shifts to JitoSOL + BAM TEE; Harmonic's moat must shift to something not on the roadmap</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr>
+
+  <!-- ============================================================= -->
+  <h2 id="s14"><span class="num">14</span>Questions to Ask the Lecturer</h2>
+  <p class="sub">Ordered from "easy warm-up" to "sharpest." Pick 1–2 that match the room.</p>
+
+  <div class="callout question">
+    <span class="label">Q1 · Warm-up · architecture</span>
+    <p>The <code>harmonic/proposer</code> component — is it a sidecar process alongside Agave, a patched fork, or a library? What's the end-to-end gRPC latency budget from builder submission to validator block selection?</p>
+  </div>
+
+  <div class="callout question">
+    <span class="label">Q2 · Engineering · scheduler</span>
+    <p>Agave's central scheduler uses a prio-graph; Firedancer's pack tile uses fast bitsets with Goldilocks packing rules. How does Harmonic's engine reason about cross-builder block scoring when each builder is using a different internal scheduling strategy?</p>
+  </div>
+
+  <div class="callout question">
+    <span class="label">Q3 · Economics · fee redistribution</span>
+    <p>Constellation moves ordering fees from "leader takes all" to "all validators by stake weight." Does that expand your market (every validator now cares about block quality) or compress it (leaders no longer pocket the upside that funded Jito's flywheel)?</p>
+  </div>
+
+  <div class="callout question">
+    <span class="label">Q4 · Forward-looking · APE</span>
+    <p>If APE ships and formalizes <code>UserBlockSlots</code> as a protocol-level builder role, does Harmonic become a builder, a builder aggregator, or something else? How does your current architecture map to APE's builder model?</p>
+  </div>
+
+  <div class="callout question">
+    <span class="label">Q5 · Latency / packing</span>
+    <p>Jito's IBRL Explorer surfaced "late packing" on Harmonic validators. Your counter is that the 50ms microblock auction resolves at final ticks. What metric do <em>you</em> publish that you'd want the validator community to evaluate builder quality on instead?</p>
+  </div>
+
+  <div class="callout question">
+    <span class="label">Q6 · Sharpest · vertical integration</span>
+    <p>Temporal operates Harmonic, Nozomi, <em>and</em> HumidiFi. Blockworks reported HumidiFi's oracle-update win rate was 73% on Harmonic validators pre-late-January, vs 37–52% elsewhere. What changed technically when that gap closed, and what's the structural firewall between Harmonic's auction logic and HumidiFi's order flow going forward?</p>
+  </div>
+
+  <div class="callout question">
+    <span class="label">Q7 · Future-proofing · ACE</span>
+    <p>Protocol-level ACE is 2027+. BAM covers the gap with TEE-secured execution but is single-operator. Does Harmonic plan a TEE / verifiability layer for external builders, or are you betting validators will accept the open marketplace's reputation model instead?</p>
+  </div>
+
+  <hr>
+
+  <!-- ============================================================= -->
+  <h2 id="s15"><span class="num">15</span>Quick Reference Card</h2>
+  <p class="sub">Numbers and names to have cold for Q&A.</p>
+
+  <h3>Solana fundamentals</h3>
+  <div class="stats">
+    <div class="stat"><div class="v">400 ms</div><div class="k">slot</div></div>
+    <div class="stat"><div class="v">4 slots</div><div class="k">leader window</div></div>
+    <div class="stat"><div class="v">432k</div><div class="k">slots/epoch</div></div>
+    <div class="stat"><div class="v">60M CU</div><div class="k">block limit</div></div>
+    <div class="stat"><div class="v">12M CU</div><div class="k">per acct write</div></div>
+    <div class="stat"><div class="v">6 + 1</div><div class="k">banking threads</div></div>
+  </div>
+
+  <h3>Jito ecosystem</h3>
+  <div class="stats">
+    <div class="stat"><div class="v">~95%</div><div class="k">stake on Jito-Solana</div></div>
+    <div class="stat"><div class="v">5 tx</div><div class="k">max per bundle</div></div>
+    <div class="stat"><div class="v">200 ms</div><div class="k">relayer hold</div></div>
+    <div class="stat"><div class="v">8 PDAs</div><div class="k">tip accounts</div></div>
+    <div class="stat"><div class="v">3%</div><div class="k">TipRouter cut</div></div>
+    <div class="stat"><div class="v">$720M</div><div class="k">2025 MEV REV</div></div>
+  </div>
+
+  <h3>Harmonic specifics</h3>
+  <div class="stats">
+    <div class="stat"><div class="v">$6M</div><div class="k">seed (Paradigm)</div></div>
+    <div class="stat"><div class="v">Nov 2025</div><div class="k">launch</div></div>
+    <div class="stat"><div class="v">~10</div><div class="k">team (NYC)</div></div>
+    <div class="stat"><div class="v">50 ms</div><div class="k">microblock auction</div></div>
+    <div class="stat"><div class="v">16.8%</div><div class="k">stake (Feb 2026)</div></div>
+    <div class="stat"><div class="v">+76%</div><div class="k">revenue vs median</div></div>
+  </div>
+
+  <h3>People + projects worth name-dropping correctly</h3>
+  <ul class="clean">
+    <li><strong>Ben Coverston</strong> — Harmonic CEO, ex-quant, founding eng at Temporal</li>
+    <li><strong>Jakob Povsic</strong> — Harmonic co-founder, Temporal co-founder</li>
+    <li><strong>Lucas Bruder</strong> — Jito CEO</li>
+    <li><strong>Anatoly Yakovenko (toly)</strong> — Solana co-founder, vocal on "competition over fairness mandates"</li>
+    <li><strong>Mert Mumtaz</strong> — Helius CEO, vocal critic of Jito's mempool shutdown</li>
+    <li><strong>Temporal</strong> — parent R&D firm: Harmonic + Nozomi + HumidiFi (the vertical-integration concern)</li>
+    <li><strong>DeezNode</strong> — the private-mempool operator that filled the post-shutdown sandwich vacuum</li>
+    <li><strong>Dissonance</strong> — Harmonic's block explorer at explorer.harmonic.gg</li>
+    <li><strong>IBRL Explorer</strong> — Jito's competing explorer, launched Jan 2026 to surface Harmonic's late-packing</li>
+  </ul>
+
+  <h3>SIMDs to recognize</h3>
+  <div class="table-wrap">
+    <table>
+      <tr><td><code>SIMD-0096</code></td><td>Priority fees 100% to validators (eliminated 50% burn). Activated 2024.</td></tr>
+      <tr><td><code>SIMD-0110</code></td><td>Dynamic fees on contentious accounts. Proposed.</td></tr>
+      <tr><td><code>SIMD-0256</code></td><td>Block CU limit 48M → 60M. Activated 2025.</td></tr>
+      <tr><td><code>SIMD-0286</code></td><td>Block CU to 100M. Proposed.</td></tr>
+      <tr><td><code>SIMD-0326</code></td><td>Alpenglow. Passed Sept 2025 (98.27% approval). Mainnet Q3 2026.</td></tr>
+      <tr><td><code>SIMD-0370</code></td><td>Remove block size limits pending client diversity milestone.</td></tr>
+    </table>
+  </div>
+
+  <hr>
+
+  <h2 id="s16"><span class="num">16</span>One Closing Frame</h2>
+  <p>If you only carry one frame into the room, make it this:</p>
+
+  <blockquote>
+    Solana's block-building market is a temporary shape. It exists because the protocol has a monolithic leader and no PBS. Every company in this space is a bet on what fills the gap <em>between today's leader-does-everything model and tomorrow's protocol-level builder roles</em>. Jito's bet is "be the integrated incumbent." Harmonic's bet is "be the open marketplace." Anza's bet is "fix it at the protocol layer and these companies become thin overlays." The next 18 months decide which bet pays.
+  </blockquote>
+
+  <footer>
+    Built 2026-05-28 for the Harmonic guest lecture · Turbin3 Adv SVM cohort.
+    Source briefs in <code>~/Brain/Research/solana/</code>.
+    Verify numbers before quoting in public.
+  </footer>
+
+</main>
+
+<aside>
+  <div class="toc-title">CONTENTS</div>
+  <ul class="toc">
+    <li><a href="#s1"><span class="num">01</span>Mental model</a></li>
+    <li><a href="#s2"><span class="num">02</span>Slots &amp; leaders</a></li>
+    <li><a href="#s3"><span class="num">03</span>TPU pipeline</a></li>
+    <li><a href="#s4"><span class="num">04</span>BankingStage</a></li>
+    <li><a href="#s5"><span class="num">05</span>Account locks</a></li>
+    <li><a href="#s6"><span class="num">06</span>PoH &amp; limits</a></li>
+    <li><a href="#s7"><span class="num">07</span>Eth PBS vs Solana</a></li>
+    <li><a href="#s8"><span class="num">08</span>Jito</a></li>
+    <li><a href="#s9"><span class="num">09</span>MEV landscape</a></li>
+    <li><a href="#s10"><span class="num">10</span>Harmonic</a></li>
+    <li><a href="#s11"><span class="num">11</span>Jito vs Harmonic</a></li>
+    <li><a href="#s12"><span class="num">12</span>Roadmap</a></li>
+    <li><a href="#s13"><span class="num">13</span>Future</a></li>
+    <li><a href="#s14"><span class="num">14</span>Questions to ask</a></li>
+    <li><a href="#s15"><span class="num">15</span>Reference card</a></li>
+    <li><a href="#s16"><span class="num">16</span>Closing frame</a></li>
+  </ul>
+</aside>
+
+</div>
+</body>
+</html>

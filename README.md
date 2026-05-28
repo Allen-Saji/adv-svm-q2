@@ -35,6 +35,7 @@ Open any `.html` file in a browser -- they are self-contained with no build step
 | Part | File | Topic |
 |------|------|-------|
 | 1 | `part1-architecture-walkthrough.html` | End-to-end Solana architecture, from user tx to rooted finality (77-step walkthrough with inline visuals) |
+| 2 | `part2-harmonic-lecture-prep.html` | Open block building -- Jito stack, MEV taxonomy, Harmonic's multi-builder marketplace, Alpenglow/APE/Constellation implications, and graduated questions for a Harmonic guest lecture |
 
 ## Author
 
