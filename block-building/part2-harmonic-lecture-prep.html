@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Block Building on Solana — Lecture Prep</title>
+<title>Block Building on Solana -- Lecture Prep</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -352,29 +352,29 @@
 <div class="layout">
 <main>
 
-  <div class="eyebrow"><span>●</span> Lecture prep · 2026-05-28 · Turbin3 Adv SVM cohort</div>
+  <div class="eyebrow"><span>●</span> Block building reference · Turbin3 Q2 2026 Advanced SVM cohort</div>
   <h1>Block Building on Solana</h1>
-  <p class="lede">From the leader's TPU pipeline all the way up to Harmonic's multi-builder marketplace and what Alpenglow + APE do to all of it. Built to be read in one sitting before today's Harmonic guest lecture.</p>
+  <p class="lede">From the leader's TPU pipeline all the way up to Harmonic's multi-builder marketplace and what Alpenglow + APE do to all of it. Written to be read in one sitting as a standalone reference on Solana block building.</p>
 
   <div class="meta-row">
-    <span><b>Speaker:</b> Harmonic team (harmonic.gg)</span>
-    <span><b>Goal:</b> follow + ask substantive questions</span>
+    <span><b>Focus:</b> Harmonic (harmonic.gg)</span>
+    <span><b>Scope:</b> TPU pipeline to open block building</span>
     <span><b>Read time:</b> ~25 min</span>
   </div>
 
   <!-- ============================================================= -->
   <h2 id="s1"><span class="num">01</span>The 30-Second Mental Model</h2>
-  <p class="sub">If you remember nothing else, hold onto this frame the whole lecture.</p>
+  <p class="sub">The one frame to hold onto before everything else.</p>
 
-  <p>On Ethereum, <strong>proposers and builders are separate roles</strong>. The validator who is up to propose a slot doesn't decide what goes in the block — they pick the most lucrative pre-built block from a market of builders (MEV-Boost, ePBS). It's an explicit auction with a defined interface.</p>
+  <p>On Ethereum, <strong>proposers and builders are separate roles</strong>. The validator who is up to propose a slot doesn't decide what goes in the block -- they pick the most lucrative pre-built block from a market of builders (MEV-Boost, ePBS). It's an explicit auction with a defined interface.</p>
 
   <p>On Solana, <strong>the leader IS the block builder</strong>. The validator whose 4-slot window is currently active runs the entire TPU pipeline in-process: receives transactions, schedules them, executes them, hashes them into PoH, and broadcasts. There is no native interface for an outside builder to hand the leader a pre-built block.</p>
 
-  <p>Every block-building company on Solana — Jito, Harmonic, Paladin, BAM, Temporal — exists to <strong>influence the leader's scheduling decisions</strong> without breaking that monolithic model. They are <em>overlays</em>, not replacements. The structural fight today is over <em>how much</em> they should influence it, <em>who</em> gets to do the influencing, and whether that should be one operator or many.</p>
+  <p>Every block-building company on Solana -- Jito, Harmonic, Paladin, BAM, Temporal -- exists to <strong>influence the leader's scheduling decisions</strong> without breaking that monolithic model. They are <em>overlays</em>, not replacements. The structural fight today is over <em>how much</em> they should influence it, <em>who</em> gets to do the influencing, and whether that should be one operator or many.</p>
 
   <div class="callout insight">
     <span class="label">★ Anchor insight</span>
-    <p>Solana block building isn't a market — it's an <strong>integration pattern</strong>. The economic and political fight is over what shape that integration takes: single-builder client fork (Jito), multi-builder aggregation (Harmonic), TEE-secured sequencing (BAM), or eventually protocol-level builder roles (APE + Constellation).</p>
+    <p>Solana block building isn't a market -- it's an <strong>integration pattern</strong>. The economic and political fight is over what shape that integration takes: single-builder client fork (Jito), multi-builder aggregation (Harmonic), TEE-secured sequencing (BAM), or eventually protocol-level builder roles (APE + Constellation).</p>
   </div>
 
   <hr>
@@ -425,7 +425,7 @@
       <!-- handoff arrow -->
       <text x="730" y="206" text-anchor="end" font-size="11" class="svg-faint">→ next leader</text>
     </svg>
-    <div class="caption">Leader schedule is computed once per epoch from the previous epoch's stake state. Every validator independently arrives at the same schedule — no coordination needed.</div>
+    <div class="caption">Leader schedule is computed once per epoch from the previous epoch's stake state. Every validator independently arrives at the same schedule -- no coordination needed.</div>
   </div>
 
   <p>Leaders are chosen by <strong>stake-weighted pseudorandom selection</strong>. 2% of stake → roughly 2% of slots, in 4-slot chunks. Slot positions are not uniformly spaced; they're statistically proportional to stake.</p>
@@ -493,7 +493,7 @@
       <!-- legend -->
       <text x="20" y="225" font-size="11" class="svg-faint">All stages run inside the validator process. Each is a separate thread (Agave) or tile (Firedancer).</text>
     </svg>
-    <div class="caption">The Solana TPU pipeline. Block building lives inside Banking Stage — everything else is plumbing.</div>
+    <div class="caption">The Solana TPU pipeline. Block building lives inside Banking Stage -- everything else is plumbing.</div>
   </div>
 
   <h3>Stage by stage</h3>
@@ -501,13 +501,13 @@
     <li><strong>Fetch.</strong> Three QUIC sockets: <code>tpu</code> (regular), <code>tpu_vote</code> (validator votes), <code>tpu_forwards</code> (overflow from previous leader). Stake-weighted QoS reserves 80% of capacity for staked nodes. 100k packet buffer.</li>
     <li><strong>SigVerify.</strong> Ed25519 signature checks (SIMD-parallelized, GPU-capable). Dedups against the recent blockhash window. Firedancer can FPGA-accelerate this to 8M sigs/sec.</li>
     <li><strong>Banking Stage.</strong> Where transactions actually get scheduled and executed against the bank. <strong>This is where every block-building company is fighting.</strong> See section 4.</li>
-    <li><strong>PoH Recorder.</strong> Single-core SHA-256 hash chain. Mixes executed transaction hashes into the chain and signs entries. Ticks every 6.25ms whether execution finished or not — if Banking falls behind, you get a partial block.</li>
+    <li><strong>PoH Recorder.</strong> Single-core SHA-256 hash chain. Mixes executed transaction hashes into the chain and signs entries. Ticks every 6.25ms whether execution finished or not -- if Banking falls behind, you get a partial block.</li>
     <li><strong>Broadcast.</strong> Packs entries into ~1,200-byte shreds, applies 32:32 Reed-Solomon erasure coding (any 32 of 64 shreds can reconstruct), and pushes via Turbine's multi-hop tree.</li>
   </ul>
 
   <div class="callout watch">
     <span class="label">Watch for</span>
-    <p>If the lecturer talks about "submitting blocks" or "block proposals," they are loose-talking — there is no native protocol for that today. They mean <em>submitting transaction bundles or candidate orderings that the leader chooses to honor.</em> The leader still constructs and signs the final block.</p>
+    <p>Talk of "submitting blocks" or "block proposals" on Solana is loose phrasing -- there is no native protocol for that today. It means <em>submitting transaction bundles or candidate orderings that the leader chooses to honor.</em> The leader still constructs and signs the final block.</p>
   </div>
 
   <hr>
@@ -523,7 +523,7 @@
       <ul class="clean">
         <li>No thread had visibility into what others were doing</li>
         <li>All 4 would race to lock the same high-priority transactions</li>
-        <li>A thread might lock 1 of 128 attempted txs — 127 retries wasted</li>
+        <li>A thread might lock 1 of 128 attempted txs -- 127 retries wasted</li>
         <li>Lower-priority txs could land before higher-priority ones</li>
         <li>Validators left ~80% of potential fees on the table</li>
       </ul>
@@ -535,7 +535,7 @@
         <li>Scheduler builds a <strong>prio-graph</strong>: edges between conflicting txs per account</li>
         <li>Workers receive guaranteed conflict-free batches via private channels</li>
         <li>Strict priority-fee ordering preserved across threads</li>
-        <li>Agave 3.1 fixed a sync-overhead bug — banking went from 39% productive to 91%</li>
+        <li>Agave 3.1 fixed a sync-overhead bug -- banking went from 39% productive to 91%</li>
         <li><strong>Up to 80% more fees per block</strong></li>
       </ul>
     </div>
@@ -623,12 +623,12 @@
   <h3>The priority formula change</h3>
   <p>v1.18 also fixed a perverse incentive in how priority was computed:</p>
   <pre><code>OLD:  priority = priority_fee / CU_requested
-NEW:  priority = ((priority_fee × CU_requested) + base_fee) / (1 + CU_requested)</code></pre>
+NEW:  priority = ((priority_fee * CU_requested) + base_fee) / (1 + CU_requested)</code></pre>
   <p>The old formula let you inflate your effective priority by claiming you needed huge CU without paying proportionally. The new one ties the priority score to <em>actual compute committed</em>.</p>
 
   <div class="callout insight">
-    <span class="label">★ Cohort-relevant insight</span>
-    <p>Firedancer's <strong>pack tile</strong> uses fast bitsets instead of a prio-graph for conflict detection — order-of-magnitude faster under burst load — and follows the <strong>Goldilocks rules</strong>: don't pack too fast (you miss higher-fee txs arriving later in the slot), don't pack too slow (you leave space empty), and dynamically adjust parallelism based on remaining slot time. Worth referencing if the speaker compares schedulers.</p>
+    <span class="label">★ Scheduler insight</span>
+    <p>Firedancer's <strong>pack tile</strong> uses fast bitsets instead of a prio-graph for conflict detection -- order-of-magnitude faster under burst load -- and follows the <strong>Goldilocks rules</strong>: don't pack too fast (you miss higher-fee txs arriving later in the slot), don't pack too slow (you leave space empty), and dynamically adjust parallelism based on remaining slot time.</p>
   </div>
 
   <hr>
@@ -637,14 +637,14 @@ NEW:  priority = ((priority_fee × CU_requested) + base_fee) / (1 + CU_requested
   <h2 id="s5"><span class="num">05</span>Account Locks &amp; Hot Accounts</h2>
   <p class="sub">Why a popular AMM pool can serialize the world.</p>
 
-  <p>Every Solana transaction declares its account access upfront — <code>{pubkey, is_writable}</code>. The scheduler reads this <em>before</em> executing anything and uses it to build conflict-free batches.</p>
+  <p>Every Solana transaction declares its account access upfront -- <code>{pubkey, is_writable}</code>. The scheduler reads this <em>before</em> executing anything and uses it to build conflict-free batches.</p>
 
   <div class="table-wrap">
     <table>
       <tr><th>Access pattern</th><th>Can run in parallel?</th></tr>
       <tr><td>Two txs both <em>read</em> account A</td><td><span style="color:var(--accent-2)">✓ yes</span></td></tr>
-      <tr><td>One <em>writes</em> A, another <em>reads</em> A</td><td><span style="color:var(--accent-red)">✗ no — serialized</span></td></tr>
-      <tr><td>Two txs both <em>write</em> A</td><td><span style="color:var(--accent-red)">✗ no — serialized</span></td></tr>
+      <tr><td>One <em>writes</em> A, another <em>reads</em> A</td><td><span style="color:var(--accent-red)">✗ no -- serialized</span></td></tr>
+      <tr><td>Two txs both <em>write</em> A</td><td><span style="color:var(--accent-red)">✗ no -- serialized</span></td></tr>
     </table>
   </div>
 
@@ -673,7 +673,7 @@ NEW:  priority = ((priority_fee × CU_requested) + base_fee) / (1 + CU_requested
         <text x="200" y="107" text-anchor="middle" font-size="10" fill="#fff">w2</text>
         <text x="200" y="151" text-anchor="middle" font-size="10" fill="#fff">w3</text>
       </g>
-      <text x="125" y="184" font-size="11" class="svg-faint" text-anchor="middle">3 threads, 3× throughput</text>
+      <text x="125" y="184" font-size="11" class="svg-faint" text-anchor="middle">3 threads, 3* throughput</text>
 
       <line x1="380" y1="20" x2="380" y2="190" stroke="#222837" stroke-dasharray="2,4"/>
 
@@ -700,7 +700,7 @@ NEW:  priority = ((priority_fee × CU_requested) + base_fee) / (1 + CU_requested
     <div class="caption">Hot accounts (Raydium pools, Pyth feeds, popular mint authorities) hard-serialize every conflicting tx onto one worker. No priority fee can break the throughput ceiling.</div>
   </div>
 
-  <p>This is why Solana DEX devs ship state-sharded pools, why oracle architectures cache reads to a per-consumer account, and why <strong>SIMD-0110</strong> (exponential write-lock fees) exists. It is also why MEV bot operators care so much about which slot they hit — once a pool is contested, ordering inside that pool is single-threaded.</p>
+  <p>This is why Solana DEX devs ship state-sharded pools, why oracle architectures cache reads to a per-consumer account, and why <strong>SIMD-0110</strong> (exponential write-lock fees) exists. It is also why MEV bot operators care so much about which slot they hit -- once a pool is contested, ordering inside that pool is single-threaded.</p>
 
   <hr>
 
@@ -715,16 +715,16 @@ NEW:  priority = ((priority_fee × CU_requested) + base_fee) / (1 + CU_requested
     <div class="stat"><div class="v">1.4M CU</div><div class="k">per transaction max</div></div>
   </div>
 
-  <p>PoH is a <strong>sequential SHA-256 hash chain</strong> running on a dedicated single thread as fast as the CPU allows. It is functionally a Verifiable Delay Function — not formally one, but sequentially preimage-resistant. Insert a tx hash into the chain at position N and the entire downstream chain depends on it; you can't retroactively reorder.</p>
+  <p>PoH is a <strong>sequential SHA-256 hash chain</strong> running on a dedicated single thread as fast as the CPU allows. It is functionally a Verifiable Delay Function -- not formally one, but sequentially preimage-resistant. Insert a tx hash into the chain at position N and the entire downstream chain depends on it; you can't retroactively reorder.</p>
 
   <pre><code>hash[N+1] = SHA256(hash[N])                          # tick
 hash[N+1] = SHA256(hash[N] || SHA256(transactions))  # entry with txs</code></pre>
 
-  <p>One slot = 64 ticks (6.25ms each). The PoH thread doesn't wait for execution — if Banking falls behind, it just inserts empty ticks and the block ships partially full. <strong>There is no retry window inside the slot.</strong> Miss it, client resubmits.</p>
+  <p>One slot = 64 ticks (6.25ms each). The PoH thread doesn't wait for execution -- if Banking falls behind, it just inserts empty ticks and the block ships partially full. <strong>There is no retry window inside the slot.</strong> Miss it, client resubmits.</p>
 
   <div class="callout watch">
     <span class="label">Number to double-check live</span>
-    <p>Most older docs still cite the <strong>48M CU</strong> block limit. SIMD-0256 raised it to <strong>60M</strong>. SIMD-0286 (proposed 100M) is under discussion. If the speaker quotes a number, this is the gotcha.</p>
+    <p>Most older docs still cite the <strong>48M CU</strong> block limit. SIMD-0256 raised it to <strong>60M</strong>. SIMD-0286 (proposed 100M) is under discussion. The 48M figure is the common gotcha in older write-ups.</p>
   </div>
 
   <hr>
@@ -793,7 +793,7 @@ hash[N+1] = SHA256(hash[N] || SHA256(transactions))  # entry with txs</code></pr
 
   <blockquote>
     "On Ethereum: validators propose, builders construct. On Solana: the leader does everything."
-    <cite>— the single most useful one-liner for this lecture</cite>
+    <cite>the single most useful one-liner for the whole model</cite>
   </blockquote>
 
   <hr>
@@ -805,9 +805,9 @@ hash[N+1] = SHA256(hash[N] || SHA256(transactions))  # entry with txs</code></pr
   <h3>What Jito-Solana actually is</h3>
   <p>A fork of Agave with three extra stages bolted into the validator:</p>
   <ul class="clean">
-    <li><strong>RelayerStage</strong> — intercepts TPU traffic before it hits Fetch</li>
-    <li><strong>BlockEngineStage</strong> — maintains a gRPC link to Jito's centralized auction service</li>
-    <li><strong>BundleStage</strong> — executes bundles atomically via <code>BundleAccountLocker</code> and writes them to PoH all-or-nothing</li>
+    <li><strong>RelayerStage</strong> -- intercepts TPU traffic before it hits Fetch</li>
+    <li><strong>BlockEngineStage</strong> -- maintains a gRPC link to Jito's centralized auction service</li>
+    <li><strong>BundleStage</strong> -- executes bundles atomically via <code>BundleAccountLocker</code> and writes them to PoH all-or-nothing</li>
   </ul>
 
   <div class="diagram">
@@ -875,18 +875,18 @@ hash[N+1] = SHA256(hash[N] || SHA256(transactions))  # entry with txs</code></pr
   <p>A bundle is <strong>up to 5 transactions, atomic, same-slot, strict order</strong>. It includes a transfer to one of 8 static <strong>tip PDAs</strong>. The block engine ranks competing bundles by <strong>tip-per-CU</strong>, not absolute tip. <code>getTipAccounts</code> returns the live PDA set.</p>
 
   <h3>ShredStream</h3>
-  <p>Skips Turbine's multi-hop tree by proxying shreds directly from the leader to whitelisted subscribers. Saves "hundreds of milliseconds" for co-located HFT operators. Access-gated via Jito Discord whitelisting and an open UDP port — this gate is where the "stake-weighted" privilege materializes for sophisticated searchers.</p>
+  <p>Skips Turbine's multi-hop tree by proxying shreds directly from the leader to whitelisted subscribers. Saves "hundreds of milliseconds" for co-located HFT operators. Access-gated via Jito Discord whitelisting and an open UDP port -- this gate is where the "stake-weighted" privilege materializes for sophisticated searchers.</p>
 
   <h3>Where the tip actually goes</h3>
   <ul class="clean">
-    <li>~95–97% → the block-producing validator (split with stakers per their MEV commission)</li>
+    <li>~95-97% → the block-producing validator (split with stakers per their MEV commission)</li>
     <li>2.7% → Jito DAO treasury (via TipRouter)</li>
     <li>0.3% → TipRouter NCN operators</li>
   </ul>
 
   <div class="callout insight">
     <span class="label">★ Why validators all opted in</span>
-    <p>Pre-Jito, a validator's APY to delegators was ~6–7%. Post-Jito, aggressive participation puts it at 8–10%. That delta compounds into stake migration — over 18 months, Jito-Solana went from 48% to 95% of active stake. Block-building infrastructure became <em>the</em> competitive moat in validator economics. <strong>This is the structural force every later player has to displace or coexist with.</strong></p>
+    <p>Pre-Jito, a validator's APY to delegators was ~6-7%. Post-Jito, aggressive participation puts it at 8-10%. That delta compounds into stake migration -- over 18 months, Jito-Solana went from 48% to 95% of active stake. Block-building infrastructure became <em>the</em> competitive moat in validator economics. <strong>This is the structural force every later player has to displace or coexist with.</strong></p>
   </div>
 
   <hr>
@@ -911,8 +911,8 @@ hash[N+1] = SHA256(hash[N] || SHA256(transactions))  # entry with txs</code></pr
   <p>Jito shut down its public mempool after sandwich extraction crossed $500M lifetime. The fight that ensued:</p>
   <ul class="clean">
     <li><strong>Jito's position:</strong> sandwiching was a pure negative externality; shutting down the public mempool was a public good.</li>
-    <li><strong>Mert / Charbonneau et al.:</strong> a centralized operator unilaterally redefined the market. Sandwich activity didn't stop — it moved to opaque private mempools (DeezNode) where validators take 50% of sandwich profits.</li>
-    <li><strong>Outcome:</strong> "wide sandwich" attacks (50–300ms gaps, exploiting the relayer delay rather than tight bundle ordering) increased ~30×.</li>
+    <li><strong>Mert / Charbonneau et al.:</strong> a centralized operator unilaterally redefined the market. Sandwich activity didn't stop -- it moved to opaque private mempools (DeezNode) where validators take 50% of sandwich profits.</li>
+    <li><strong>Outcome:</strong> "wide sandwich" attacks (50-300ms gaps, exploiting the relayer delay rather than tight bundle ordering) increased ~30*.</li>
   </ul>
 
   <p>This is the political backdrop to <strong>Harmonic's "open block building"</strong> framing. If you can't trust a single operator to censor toxic MEV correctly, the answer (Harmonic argues) is to let validators choose between competing builders with different policies.</p>
@@ -998,7 +998,7 @@ hash[N+1] = SHA256(hash[N] || SHA256(transactions))  # entry with txs</code></pr
   </div>
 
   <h3>What the validator actually installs</h3>
-  <p>A component called <code>harmonic/proposer</code>, marketed as a "drop-in client" that runs alongside an existing Agave validator. <strong>Whether it's a sidecar process or a forked client binary is not fully spelled out in public docs</strong> — good question for the speaker. Onboarding requires manual whitelisting + a "builder binding" applied by the Harmonic team.</p>
+  <p>A component called <code>harmonic/proposer</code>, marketed as a "drop-in client" that runs alongside an existing Agave validator. <strong>Whether it's a sidecar process or a forked client binary is not fully spelled out in public docs</strong> -- an open question. Onboarding requires manual whitelisting + a "builder binding" applied by the Harmonic team.</p>
 
   <h3>Harmonic Bundles vs Jito Bundles</h3>
   <div class="table-wrap">
@@ -1007,9 +1007,9 @@ hash[N+1] = SHA256(hash[N] || SHA256(transactions))  # entry with txs</code></pr
       <tr><td>gRPC interface</td><td>Custom <code>jito-protos</code></td><td>gRPC-compatible with <code>jito-protos</code> (easy migrate)</td></tr>
       <tr><td>Auth role</td><td>Standard searcher</td><td><code>ShreadStreamSubscriber</code> (=3)</td></tr>
       <tr><td>Access</td><td>Permissionless</td><td><strong>Whitelist gated</strong> (closed beta)</td></tr>
-      <tr><td>Tip mechanism</td><td>Transfer to 1 of 8 tip PDAs</td><td>Standard priority fee — no separate transfer ix</td></tr>
+      <tr><td>Tip mechanism</td><td>Transfer to 1 of 8 tip PDAs</td><td>Standard priority fee -- no separate transfer ix</td></tr>
       <tr><td>Effective fee delta</td><td>Pays 3% TipRouter cut</td><td>~6% less tip needed for equivalent ranking</td></tr>
-      <tr><td>Atomicity</td><td>All-or-nothing, ≤5 tx</td><td>[UNVERIFIED — depends on individual builder]</td></tr>
+      <tr><td>Atomicity</td><td>All-or-nothing, ≤5 tx</td><td>[UNVERIFIED -- depends on individual builder]</td></tr>
     </table>
   </div>
 
@@ -1022,17 +1022,17 @@ hash[N+1] = SHA256(hash[N] || SHA256(transactions))  # entry with txs</code></pr
     <div class="stat"><div class="v">45</div><div class="k">validators (Feb 2026)</div></div>
   </div>
 
-  <p>Jito launched their IBRL Explorer in January 2026 specifically to highlight what they called Harmonic's "late packing" — transactions clustered at the end of slots, evidence of delayed state propagation. Harmonic's counter: blocks <em>look</em> late-packed because the 50ms microblock auction resolves at final ticks; the right metric is throughput per slot, not packing distribution. <strong>Expect this to come up.</strong></p>
+  <p>Jito launched their IBRL Explorer in January 2026 specifically to highlight what they called Harmonic's "late packing" -- transactions clustered at the end of slots, evidence of delayed state propagation. Harmonic's counter: blocks <em>look</em> late-packed because the 50ms microblock auction resolves at final ticks; the right metric is throughput per slot, not packing distribution. <strong>Expect this to come up.</strong></p>
 
   <div class="callout warn">
     <span class="label">⚠ The vertical-integration question</span>
-    <p>Harmonic is operated by Temporal, which <em>also</em> runs <strong>Nozomi</strong> (a tx-landing service) and <strong>HumidiFi</strong> (a market-making DEX that processed ~60% of Solana spot volume at peak). Independent research (Blockworks) found HumidiFi's oracle-update win rate was <strong>73% on Harmonic validators vs 37–52% elsewhere</strong> in the period before late January 2026. Harmonic says that advantage has since disappeared. This is the sharpest critique of the project and worth raising thoughtfully if the speaker doesn't address it.</p>
+    <p>Harmonic is operated by Temporal, which <em>also</em> runs <strong>Nozomi</strong> (a tx-landing service) and <strong>HumidiFi</strong> (a market-making DEX that processed ~60% of Solana spot volume at peak). Independent research (Blockworks) found HumidiFi's oracle-update win rate was <strong>73% on Harmonic validators vs 37-52% elsewhere</strong> in the period before late January 2026. Harmonic says that advantage has since disappeared. This is the sharpest open critique of the project.</p>
   </div>
 
   <hr>
 
   <!-- ============================================================= -->
-  <h2 id="s11"><span class="num">11</span>Jito vs Harmonic — At a Glance</h2>
+  <h2 id="s11"><span class="num">11</span>Jito vs Harmonic -- At a Glance</h2>
 
   <div class="table-wrap">
     <table>
@@ -1046,7 +1046,7 @@ hash[N+1] = SHA256(hash[N] || SHA256(transactions))  # entry with txs</code></pr
       <tr><td>Protocol fee</td><td>3% (2.7% DAO + 0.3% NCN)</td><td>0% on tips; business model undisclosed</td></tr>
       <tr><td>Transparency tools</td><td>IBRL Explorer (Jan 2026)</td><td>Dissonance explorer</td></tr>
       <tr><td>Conflict-of-interest profile</td><td>Operates JitoSOL + bundle auction</td><td>Operated by Temporal, which also runs HumidiFi (DEX) and Nozomi</td></tr>
-      <tr><td>Block latency</td><td>362ms continuation (BAM baseline)</td><td>407–534ms continuation/handoff</td></tr>
+      <tr><td>Block latency</td><td>362ms continuation (BAM baseline)</td><td>407-534ms continuation/handoff</td></tr>
     </table>
   </div>
 
@@ -1114,15 +1114,15 @@ hash[N+1] = SHA256(hash[N] || SHA256(transactions))  # entry with txs</code></pr
   <p>Replaces TowerBFT with <strong>Votor</strong> (two-path BLS-aggregated voting: ≥80% stake → 100ms finality, ≥60% → 150ms) and Turbine with <strong>Rotor</strong> (single-hop shred propagation, ships separately). Votes go off-chain, freeing ~75% of ledger bandwidth. Leader rotation itself does <em>not</em> change.</p>
   <p>For block builders: the finality window shrinks from 12.8s to ~150ms. <strong>Dark MEV (timing manipulation within a leader slot) becomes much more expensive</strong> because early-slot delays are penalized harder than late ones.</p>
 
-  <h3>APE — Async Program Execution <span class="tag later">2027+</span></h3>
-  <p>Separates consensus from execution. The block becomes a <strong>pure ordering commitment</strong> — leaders seal ordering without knowing execution outcomes. Two domains:</p>
+  <h3>APE -- Async Program Execution <span class="tag later">2027+</span></h3>
+  <p>Separates consensus from execution. The block becomes a <strong>pure ordering commitment</strong> -- leaders seal ordering without knowing execution outcomes. Two domains:</p>
   <ul class="clean">
-    <li><strong>Vote Execution Domain (VED)</strong> — fast lane: <code>VoteProgram</code>, <code>SystemProgram</code>, fee payers. Leader executes immediately.</li>
-    <li><strong>User Execution Domain (UED)</strong> — slow lane: all DeFi, NFTs, games. Executed by validators on the heaviest fork only.</li>
+    <li><strong>Vote Execution Domain (VED)</strong> -- fast lane: <code>VoteProgram</code>, <code>SystemProgram</code>, fee payers. Leader executes immediately.</li>
+    <li><strong>User Execution Domain (UED)</strong> -- slow lane: all DeFi, NFTs, games. Executed by validators on the heaviest fork only.</li>
   </ul>
-  <p>Crucially, APE introduces <strong>formal builders</strong> via <code>UserBlockSlots</code> — staked nodes separate from leaders who construct non-vote UserBlocks. Default 2 per regular slot. <strong>This is the layer Harmonic is built for.</strong> If APE ships, Harmonic's "aggregate competing builders" model goes from useful overlay to native protocol fit.</p>
+  <p>Crucially, APE introduces <strong>formal builders</strong> via <code>UserBlockSlots</code> -- staked nodes separate from leaders who construct non-vote UserBlocks. Default 2 per regular slot. <strong>This is the layer Harmonic is built for.</strong> If APE ships, Harmonic's "aggregate competing builders" model goes from useful overlay to native protocol fit.</p>
 
-  <h3>Constellation (MCP / MCL) <span class="tag later">Late 2026 — 2027</span></h3>
+  <h3>Constellation (MCP / MCL) <span class="tag later">Late 2026 -- 2027</span></h3>
   <p>Adds two new roles on top of Alpenglow: ~16 <strong>Proposers</strong> on a 50ms cycle and 256 <strong>Attesters</strong>. Any pslice attested by ≥40% of attesters <em>must</em> be included by the leader, or the block is cryptographically invalid. Hard censorship resistance enforced at the protocol layer.</p>
   <p>Fee restructure: ordering (priority) fees go to <strong>all validators by stake weight</strong>, not just the leader. This compresses the exclusive MEV advantage current Jito-optimized validators hold.</p>
 
@@ -1139,7 +1139,7 @@ hash[N+1] = SHA256(hash[N] || SHA256(transactions))  # entry with txs</code></pr
     <div>
       <h4 style="color:var(--accent-2)">⊕ Bull case (Harmonic survives + grows)</h4>
       <ul class="clean">
-        <li>APE creates a formal builder market — Harmonic IS the aggregation layer for that market</li>
+        <li>APE creates a formal builder market -- Harmonic IS the aggregation layer for that market</li>
         <li>Constellation removes proximity advantage → builders compete on quality, not just latency</li>
         <li>Searchers still need order-flow routing; protocol-level inclusion doesn't pick the best builder</li>
         <li>Builder specialization (perps, arb, NFT mints) keeps the marketplace useful</li>
@@ -1161,12 +1161,12 @@ hash[N+1] = SHA256(hash[N] || SHA256(transactions))  # entry with txs</code></pr
   <hr>
 
   <!-- ============================================================= -->
-  <h2 id="s14"><span class="num">14</span>Questions to Ask the Lecturer</h2>
-  <p class="sub">Ordered from "easy warm-up" to "sharpest." Pick 1–2 that match the room.</p>
+  <h2 id="s14"><span class="num">14</span>Open Questions for Harmonic</h2>
+  <p class="sub">Ordered from warm-up to sharpest.</p>
 
   <div class="callout question">
     <span class="label">Q1 · Warm-up · architecture</span>
-    <p>The <code>harmonic/proposer</code> component — is it a sidecar process alongside Agave, a patched fork, or a library? What's the end-to-end gRPC latency budget from builder submission to validator block selection?</p>
+    <p>The <code>harmonic/proposer</code> component -- is it a sidecar process alongside Agave, a patched fork, or a library? What's the end-to-end gRPC latency budget from builder submission to validator block selection?</p>
   </div>
 
   <div class="callout question">
@@ -1191,7 +1191,7 @@ hash[N+1] = SHA256(hash[N] || SHA256(transactions))  # entry with txs</code></pr
 
   <div class="callout question">
     <span class="label">Q6 · Sharpest · vertical integration</span>
-    <p>Temporal operates Harmonic, Nozomi, <em>and</em> HumidiFi. Blockworks reported HumidiFi's oracle-update win rate was 73% on Harmonic validators pre-late-January, vs 37–52% elsewhere. What changed technically when that gap closed, and what's the structural firewall between Harmonic's auction logic and HumidiFi's order flow going forward?</p>
+    <p>Temporal operates Harmonic, Nozomi, <em>and</em> HumidiFi. Blockworks reported HumidiFi's oracle-update win rate was 73% on Harmonic validators pre-late-January, vs 37-52% elsewhere. What changed technically when that gap closed, and what's the structural firewall between Harmonic's auction logic and HumidiFi's order flow going forward?</p>
   </div>
 
   <div class="callout question">
@@ -1203,7 +1203,7 @@ hash[N+1] = SHA256(hash[N] || SHA256(transactions))  # entry with txs</code></pr
 
   <!-- ============================================================= -->
   <h2 id="s15"><span class="num">15</span>Quick Reference Card</h2>
-  <p class="sub">Numbers and names to have cold for Q&A.</p>
+  <p class="sub">Numbers and names worth knowing cold.</p>
 
   <h3>Solana fundamentals</h3>
   <div class="stats">
@@ -1235,17 +1235,17 @@ hash[N+1] = SHA256(hash[N] || SHA256(transactions))  # entry with txs</code></pr
     <div class="stat"><div class="v">+76%</div><div class="k">revenue vs median</div></div>
   </div>
 
-  <h3>People + projects worth name-dropping correctly</h3>
+  <h3>People + projects worth knowing</h3>
   <ul class="clean">
-    <li><strong>Ben Coverston</strong> — Harmonic CEO, ex-quant, founding eng at Temporal</li>
-    <li><strong>Jakob Povsic</strong> — Harmonic co-founder, Temporal co-founder</li>
-    <li><strong>Lucas Bruder</strong> — Jito CEO</li>
-    <li><strong>Anatoly Yakovenko (toly)</strong> — Solana co-founder, vocal on "competition over fairness mandates"</li>
-    <li><strong>Mert Mumtaz</strong> — Helius CEO, vocal critic of Jito's mempool shutdown</li>
-    <li><strong>Temporal</strong> — parent R&D firm: Harmonic + Nozomi + HumidiFi (the vertical-integration concern)</li>
-    <li><strong>DeezNode</strong> — the private-mempool operator that filled the post-shutdown sandwich vacuum</li>
-    <li><strong>Dissonance</strong> — Harmonic's block explorer at explorer.harmonic.gg</li>
-    <li><strong>IBRL Explorer</strong> — Jito's competing explorer, launched Jan 2026 to surface Harmonic's late-packing</li>
+    <li><strong>Ben Coverston</strong> -- Harmonic CEO, ex-quant, founding eng at Temporal</li>
+    <li><strong>Jakob Povsic</strong> -- Harmonic co-founder, Temporal co-founder</li>
+    <li><strong>Lucas Bruder</strong> -- Jito CEO</li>
+    <li><strong>Anatoly Yakovenko (toly)</strong> -- Solana co-founder, vocal on "competition over fairness mandates"</li>
+    <li><strong>Mert Mumtaz</strong> -- Helius CEO, vocal critic of Jito's mempool shutdown</li>
+    <li><strong>Temporal</strong> -- parent R&D firm: Harmonic + Nozomi + HumidiFi (the vertical-integration concern)</li>
+    <li><strong>DeezNode</strong> -- the private-mempool operator that filled the post-shutdown sandwich vacuum</li>
+    <li><strong>Dissonance</strong> -- Harmonic's block explorer at explorer.harmonic.gg</li>
+    <li><strong>IBRL Explorer</strong> -- Jito's competing explorer, launched Jan 2026 to surface Harmonic's late-packing</li>
   </ul>
 
   <h3>SIMDs to recognize</h3>
@@ -1263,16 +1263,15 @@ hash[N+1] = SHA256(hash[N] || SHA256(transactions))  # entry with txs</code></pr
   <hr>
 
   <h2 id="s16"><span class="num">16</span>One Closing Frame</h2>
-  <p>If you only carry one frame into the room, make it this:</p>
+  <p>If you carry one frame away from all of this, make it this:</p>
 
   <blockquote>
     Solana's block-building market is a temporary shape. It exists because the protocol has a monolithic leader and no PBS. Every company in this space is a bet on what fills the gap <em>between today's leader-does-everything model and tomorrow's protocol-level builder roles</em>. Jito's bet is "be the integrated incumbent." Harmonic's bet is "be the open marketplace." Anza's bet is "fix it at the protocol layer and these companies become thin overlays." The next 18 months decide which bet pays.
   </blockquote>
 
   <footer>
-    Built 2026-05-28 for the Harmonic guest lecture · Turbin3 Adv SVM cohort.
-    Source briefs in <code>~/Brain/Research/solana/</code>.
-    Verify numbers before quoting in public.
+    Turbin3 Q2 2026 Advanced SVM cohort · block building reference.
+    Verify figures against primary sources before quoting.
   </footer>
 
 </main>
