@@ -11,7 +11,7 @@
 // so forgetting to run this never breaks the build.
 
 import { chromium } from 'playwright';
-import { readdirSync, statSync, mkdirSync, existsSync } from 'node:fs';
+import { readdirSync, statSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, basename } from 'node:path';
 
@@ -23,6 +23,15 @@ const WIDTH = 1200;
 const HEIGHT = 750; // 16:10 above-the-fold capture
 
 mkdirSync(THUMB_DIR, { recursive: true });
+
+// Optional PNG compression via sharp (palette quantization, pngquant-style).
+// Graceful: if sharp is not installed, raw screenshots are written instead.
+let sharp = null;
+try {
+  sharp = (await import('sharp')).default;
+} catch {
+  console.warn('sharp not installed; writing uncompressed PNGs (run `npm install` to enable compression).');
+}
 
 // Prefer Playwright's bundled Chromium; fall back to a system Chromium-based
 // browser (Brave/Chrome) so this runs without a separate browser download.
@@ -60,7 +69,12 @@ for (const topic of topics) {
     await page.evaluate(() => document.fonts && document.fonts.ready);
     await page.waitForTimeout(250);
     const out = join(THUMB_DIR, `${topic}__${basename(file, '.html')}.png`);
-    await page.screenshot({ path: out, clip: { x: 0, y: 0, width: WIDTH, height: HEIGHT } });
+    const buf = await page.screenshot({ clip: { x: 0, y: 0, width: WIDTH, height: HEIGHT } });
+    if (sharp) {
+      await sharp(buf).png({ palette: true, quality: 80, effort: 9, compressionLevel: 9 }).toFile(out);
+    } else {
+      writeFileSync(out, buf);
+    }
     console.log(`  shot: ${topic}/${file}`);
     count++;
   }

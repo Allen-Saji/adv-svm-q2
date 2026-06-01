@@ -10,6 +10,7 @@
     "site": "npm run shots && npm run build"
   },
   "devDependencies": {
-    "playwright": "^1.58.0"
+    "playwright": "^1.58.0",
+    "sharp": "^0.34.0"
   }
 }

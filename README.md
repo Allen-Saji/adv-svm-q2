@@ -54,7 +54,8 @@ is generated from the note files themselves by a zero-dependency Node script
    `<meta name="note-title">`, `<meta name="note-order">`, or
    `<meta name="note-category">` in the `<head>`.
 3. Optional: generate a preview thumbnail with `npm run shots` (needs a local
-   Chromium-based browser). Without one, the card uses a generated poster.
+   Chromium-based browser; thumbnails are auto-compressed via sharp). Without
+   one, the card uses a generated poster.
 4. Run `node site/build.mjs`, commit, and push. The index and the deploy update
    automatically.
 
