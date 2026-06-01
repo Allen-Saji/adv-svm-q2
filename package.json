@@ -1,0 +1,15 @@
+{
+  "name": "adv-svm-q2-site",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Static showcase site for the Advanced SVM Q2 2026 notes.",
+  "scripts": {
+    "build": "node site/build.mjs",
+    "shots": "node site/shots.mjs",
+    "site": "npm run shots && npm run build"
+  },
+  "devDependencies": {
+    "playwright": "^1.58.0"
+  }
+}

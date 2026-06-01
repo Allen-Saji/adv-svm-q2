@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Advanced SVM // Field Notes</title>
+<meta name="description" content="Deep dives into Solana internals: Linux networking for Agave validators, block building, MEV, and the protocol roadmap. Turbin3 Q2 2026 Advanced SVM cohort.">
+<meta property="og:title" content="Advanced SVM // Field Notes">
+<meta property="og:description" content="Deep dives into Solana internals from the Turbin3 Advanced SVM cohort.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0c11'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%2314f195'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+
+:root{
+  --bg:#0a0c11; --bg-elevated:#11141c; --bg-soft:#161a24;
+  --border:rgba(255,255,255,.08); --border-soft:rgba(255,255,255,.05);
+  --text:#e6e9f0; --text-dim:#aab1c2; --text-faint:#6b7385;
+  --green:#14f195; --purple:#9945ff; --warm:#ffb454; --blue:#56b6ff;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  background:var(--bg); color:var(--text);
+  font-family:'Inter',system-ui,-apple-system,sans-serif;
+  line-height:1.6; -webkit-font-smoothing:antialiased;
+  position:relative; min-height:100vh;
+}
+.glow{position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:radial-gradient(60% 50% at 50% -10%,rgba(153,69,255,.14),transparent 70%),
+             radial-gradient(40% 40% at 90% 10%,rgba(20,241,149,.08),transparent 70%);}
+main{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:0 28px 96px}
+
+/* hero */
+.hero{padding:96px 0 64px;border-bottom:1px solid var(--border-soft)}
+.eyebrow{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.22em;
+  text-transform:uppercase;color:var(--text-faint);margin-bottom:28px}
+.eyebrow span{color:var(--green)}
+.hero h1{font-size:clamp(38px,6vw,68px);font-weight:700;line-height:1.04;letter-spacing:-.02em}
+.hero h1 .grad{background:linear-gradient(100deg,var(--green),var(--blue) 60%,var(--purple));
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.lede{margin-top:24px;max-width:660px;font-size:18px;color:var(--text-dim)}
+.stats{display:flex;gap:40px;margin-top:40px}
+.stat{display:flex;flex-direction:column}
+.stat .v{font-family:'JetBrains Mono',monospace;font-size:26px;font-weight:600;color:var(--text)}
+.stat .k{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--text-faint);margin-top:4px}
+
+/* topic section */
+.topic{padding:64px 0 8px}
+.topic-head{display:flex;align-items:baseline;gap:16px}
+.topic-head h2{font-size:24px;font-weight:650;letter-spacing:-.01em}
+.topic-head .count{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text-faint)}
+.topic-tagline{color:var(--text-dim);margin-top:8px;font-size:15px}
+
+/* grid */
+.grid{display:grid;gap:22px;margin-top:32px;
+  grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.card{display:flex;flex-direction:column;text-decoration:none;color:inherit;
+  background:var(--bg-elevated);border:1px solid var(--border);border-radius:14px;
+  overflow:hidden;transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease}
+.card:hover{transform:translateY(-4px);border-color:rgba(20,241,149,.4);
+  box-shadow:0 18px 50px -20px rgba(0,0,0,.7),0 0 0 1px rgba(20,241,149,.15)}
+.thumb{aspect-ratio:16/10;overflow:hidden;background:var(--bg-soft);
+  border-bottom:1px solid var(--border-soft);position:relative}
+.thumb img{width:100%;height:100%;object-fit:cover;object-position:top center;
+  transition:transform .35s ease;display:block}
+.card:hover .thumb img{transform:scale(1.04)}
+.thumb.poster{display:flex;flex-direction:column;justify-content:center;align-items:flex-start;
+  gap:8px;padding:24px;
+  background:linear-gradient(140deg,#11141c,#1a1030 60%,#0d2018)}
+.poster-num{font-family:'JetBrains Mono',monospace;font-size:13px;letter-spacing:.2em;color:var(--green)}
+.poster-title{font-size:20px;font-weight:600;color:var(--text);line-height:1.2}
+.card-body{padding:18px 20px 22px;display:flex;flex-direction:column;flex:1}
+.card-eyebrow{font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--text-faint)}
+.card-title{font-size:18px;font-weight:600;margin:8px 0 8px;letter-spacing:-.01em;line-height:1.25}
+.card-summary{font-size:14px;color:var(--text-dim);
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+
+/* footer */
+footer{margin-top:80px;padding-top:28px;border-top:1px solid var(--border-soft);
+  display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;
+  font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text-faint)}
+footer a{color:var(--green);text-decoration:none}
+footer a:hover{text-decoration:underline}
+
+@media(max-width:640px){
+  main{padding:0 18px 64px}
+  .hero{padding:64px 0 48px}
+  .stats{gap:28px}
+}
+
+</style>
+</head>
+<body>
+  <div class="glow"></div>
+  <main>
+    <header class="hero">
+      <div class="eyebrow"><span>&#9679;</span> Turbin3 Q2 2026 &#47;&#47; Advanced SVM cohort</div>
+      <h1>Field Notes on<br><span class="grad">Solana Internals</span></h1>
+      <p class="lede">Long-form, diagram-heavy deep dives into how Solana works below the API line: validator networking, block building, MEV, and the protocol roadmap. Each note is a self-contained page, no build step, written to be read in one sitting.</p>
+      <div class="stats">
+        <div class="stat"><span class="v">9</span><span class="k">notes</span></div>
+        <div class="stat"><span class="v">2</span><span class="k">topics</span></div>
+        <div class="stat"><span class="v">open</span><span class="k">source</span></div>
+      </div>
+    </header>
+
+    <section class="topic">
+      <div class="topic-head">
+        <h2>Linux Networking for Agave</h2>
+        <span class="count">7 notes</span>
+      </div>
+      <p class="topic-tagline">What happens to a packet before it ever reaches validator code.</p>
+      <div class="grid">
+      <a class="card" href="./linux-networking-agave/part1-why-udp.html">
+        <div class="thumb"><img loading="lazy" src="./site/thumbs/linux-networking-agave__part1-why-udp.png" alt="Why Solana Chose UDP Over TCP preview"></div>
+        <div class="card-body">
+          <div class="card-eyebrow">LINUX NETWORKING / 01</div>
+          <h3 class="card-title">Why Solana Chose UDP Over TCP</h3>
+          <p class="card-summary">Understanding why Solana uses UDP instead of TCP for validator networking.</p>
+        </div>
+      </a>
+      <a class="card" href="./linux-networking-agave/part2-packet-journey.html">
+        <div class="thumb"><img loading="lazy" src="./site/thumbs/linux-networking-agave__part2-packet-journey.png" alt="The Packet's Journey preview"></div>
+        <div class="card-body">
+          <div class="card-eyebrow">LINUX NETWORKING / 02</div>
+          <h3 class="card-title">The Packet's Journey</h3>
+          <p class="card-summary">Trace a UDP packet through the full Linux kernel receive path, from NIC to userspace.</p>
+        </div>
+      </a>
+      <a class="card" href="./linux-networking-agave/part3-why-it-breaks.html">
+        <div class="thumb"><img loading="lazy" src="./site/thumbs/linux-networking-agave__part3-why-it-breaks.png" alt="Why The Classic Path Breaks at Validator Scale preview"></div>
+        <div class="card-body">
+          <div class="card-eyebrow">LINUX NETWORKING / 03</div>
+          <h3 class="card-title">Why The Classic Path Breaks at Validator Scale</h3>
+          <p class="card-summary">Quantifying the six CPU cost centers that make the classic Linux kernel packet path collapse at 1M packets per second.</p>
+        </div>
+      </a>
+      <a class="card" href="./linux-networking-agave/part4-ebpf.html">
+        <div class="thumb"><img loading="lazy" src="./site/thumbs/linux-networking-agave__part4-ebpf.png" alt="eBPF preview"></div>
+        <div class="card-body">
+          <div class="card-eyebrow">LINUX NETWORKING / 04</div>
+          <h3 class="card-title">eBPF</h3>
+          <p class="card-summary">eBPF -- safe programmable code inside the kernel. How Linux's in-kernel virtual machine parallels Solana's SBF.</p>
+        </div>
+      </a>
+      <a class="card" href="./linux-networking-agave/part5-xdp.html">
+        <div class="thumb"><img loading="lazy" src="./site/thumbs/linux-networking-agave__part5-xdp.png" alt="XDP preview"></div>
+        <div class="card-body">
+          <div class="card-eyebrow">LINUX NETWORKING / 05</div>
+          <h3 class="card-title">XDP</h3>
+          <p class="card-summary">XDP -- the early hook that drops packets before they cost anything. eXpress Data Path runs inside the NIC driver, before sk_buff allocation.</p>
+        </div>
+      </a>
+      <a class="card" href="./linux-networking-agave/part6-af-xdp.html">
+        <div class="thumb"><img loading="lazy" src="./site/thumbs/linux-networking-agave__part6-af-xdp.png" alt="AF_XDP preview"></div>
+        <div class="card-body">
+          <div class="card-eyebrow">LINUX NETWORKING / 06</div>
+          <h3 class="card-title">AF_XDP</h3>
+          <p class="card-summary">AF_XDP zero-copy rings that bypass the kernel entirely. Shared memory, lock-free SPSC rings, and how Agave uses selective kernel bypass.</p>
+        </div>
+      </a>
+      <a class="card" href="./linux-networking-agave/part7-big-picture.html">
+        <div class="thumb"><img loading="lazy" src="./site/thumbs/linux-networking-agave__part7-big-picture.png" alt="The Big Picture preview"></div>
+        <div class="card-body">
+          <div class="card-eyebrow">LINUX NETWORKING / 07</div>
+          <h3 class="card-title">The Big Picture</h3>
+          <p class="card-summary">Classic vs XDP vs AF_XDP, Agave in practice, Firedancer's full bypass, and the story arc of the entire series.</p>
+        </div>
+      </a>
+      </div>
+    </section>
+
+    <section class="topic">
+      <div class="topic-head">
+        <h2>Block Building on Solana</h2>
+        <span class="count">2 notes</span>
+      </div>
+      <p class="topic-tagline">How a block actually gets built, and where MEV infrastructure plugs in.</p>
+      <div class="grid">
+      <a class="card" href="./block-building/part1-architecture-walkthrough.html">
+        <div class="thumb"><img loading="lazy" src="./site/thumbs/block-building__part1-architecture-walkthrough.png" alt="Architecture Walkthrough preview"></div>
+        <div class="card-body">
+          <div class="card-eyebrow">BLOCK BUILDING / 01</div>
+          <h3 class="card-title">Architecture Walkthrough</h3>
+          <p class="card-summary">End-to-end walkthrough of Solana's architecture, from a user transaction to rooted finality, in 77 steps with inline diagrams.</p>
+        </div>
+      </a>
+      <a class="card" href="./block-building/part2-harmonic-lecture-prep.html">
+        <div class="thumb"><img loading="lazy" src="./site/thumbs/block-building__part2-harmonic-lecture-prep.png" alt="Block Building and Harmonic preview"></div>
+        <div class="card-body">
+          <div class="card-eyebrow">BLOCK BUILDING / 02</div>
+          <h3 class="card-title">Block Building and Harmonic</h3>
+          <p class="card-summary">How Solana blocks get built, where MEV infrastructure plugs into the leader's TPU pipeline, and Harmonic's open multi-builder marketplace.</p>
+        </div>
+      </a>
+      </div>
+    </section>
+
+    <footer>
+      <span>Advanced SVM Q2 2026 &#183; Turbin3 cohort artifacts</span>
+      <a href="https://github.com/Allen-Saji/adv-svm-q2">github.com/Allen-Saji/adv-svm-q2</a>
+    </footer>
+  </main>
+</body>
+</html>
