@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>W2: Kernel Bypass | pshred Ingress at Wire Speed</title>
+<meta name="description" content="Week 2 of the Turbin3 Advanced SVM cohort decoded: XDP, eBPF, aya-rs, AF_XDP, DPDK, io_uring, QUIC-only TPU ingestion, and the pshred forwarder lab. Every jargon term, every prerequisite, and the why behind kernel-bypass packet processing for Solana validators.">
+<meta name="note-title" content="W2: Kernel Bypass -- pshred Ingress at Wire Speed">
+<meta name="note-category" content="Kernel Bypass">
+<meta name="note-order" content="1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg-primary:#0a0e17; --bg-secondary:#0f1420; --bg-card:#131927; --bg-card-hover:#1a2236;
+  --bg-code:#0d1219; --bg-highlight:rgba(0,245,160,.06);
+  --accent:#00f5a0; --accent-dim:#00c880; --accent-glow:rgba(0,245,160,.15); --accent-glow-strong:rgba(0,245,160,.3);
+  --text-primary:#e8ecf4; --text-secondary:#8a94a8; --text-muted:#5a6478; --text-code:#a8d8ea;
+  --border:#1e2a3a; --border-accent:rgba(0,245,160,.2);
+  --red:#ff6b6b; --red-dim:rgba(255,107,107,.12);
+  --orange:#ffa94d; --orange-dim:rgba(255,169,77,.12);
+  --blue:#4dabf7; --blue-dim:rgba(77,171,247,.12);
+  --purple:#b197fc; --purple-dim:rgba(177,151,252,.12);
+  --yellow:#ffd43b; --yellow-dim:rgba(255,212,59,.12);
+  --cyan:#22d3ee; --cyan-dim:rgba(34,211,238,.12);
+  --green2:#14f195;
+  --font-display:'Space Grotesk',system-ui,sans-serif;
+  --font-body:'Inter',system-ui,sans-serif;
+  --font-mono:'JetBrains Mono','Fira Code',monospace;
+  --radius-sm:6px; --radius-md:10px; --radius-lg:16px; --radius-xl:24px;
+  --shadow-card:0 4px 24px rgba(0,0,0,.3),0 1px 4px rgba(0,0,0,.2);
+  --max-width:860px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+body{font-family:var(--font-body);font-size:17px;line-height:1.7;color:var(--text-primary);background:var(--bg-primary);overflow-x:hidden}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}html{scroll-behavior:auto}}
+
+/* ambient glow */
+.glow{position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:radial-gradient(55% 45% at 50% -8%,rgba(0,245,160,.10),transparent 70%),
+             radial-gradient(40% 40% at 92% 8%,rgba(177,151,252,.08),transparent 70%)}
+
+/* top nav */
+.nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(10,14,23,.82);
+  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-bottom:1px solid var(--border);
+  height:54px;display:flex;align-items:center;justify-content:space-between;padding:0 22px}
+.nav__left{display:flex;align-items:center;gap:14px}
+.nav__tag{font-family:var(--font-mono);font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.nav__title{font-family:var(--font-display);font-size:13px;color:var(--text-secondary);display:none}
+@media(min-width:680px){.nav__title{display:block}}
+.nav__links{display:none;gap:6px}
+@media(min-width:900px){.nav__links{display:flex}}
+.nav__links a{font-family:var(--font-mono);font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted);
+  text-decoration:none;padding:5px 9px;border-radius:var(--radius-sm);transition:color .2s,background .2s}
+.nav__links a:hover,.nav__links a.active{color:var(--accent);background:var(--bg-highlight)}
+.progress{position:fixed;top:54px;left:0;height:2px;background:linear-gradient(90deg,var(--accent),var(--accent-dim));z-index:101;width:0;box-shadow:0 0 8px var(--accent-glow-strong)}
+
+main{position:relative;z-index:1;max-width:var(--max-width);margin:0 auto;padding:0 24px 140px}
+@media(min-width:768px){main{padding:0 32px 140px}}
+
+/* hero */
+.hero{padding:104px 0 56px}
+.hero__eyebrow{font-family:var(--font-mono);font-size:12px;font-weight:500;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--accent);margin-bottom:20px;display:flex;align-items:center;gap:10px}
+.hero__eyebrow::before{content:'';width:26px;height:1px;background:var(--accent)}
+.hero h1{font-family:var(--font-display);font-size:clamp(34px,6.5vw,60px);font-weight:700;line-height:1.06;letter-spacing:-.02em;margin-bottom:24px}
+.hero h1 .g{background:linear-gradient(100deg,var(--accent),var(--cyan) 55%,var(--purple));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.hero__sub{font-size:19px;line-height:1.6;color:var(--text-secondary);max-width:640px}
+.hero__sub strong{color:var(--text-primary);font-weight:600}
+.hero__meta{display:flex;flex-wrap:wrap;gap:30px;margin-top:38px;padding-top:30px;border-top:1px solid var(--border)}
+.hero__meta .m{display:flex;flex-direction:column;gap:3px}
+.hero__meta .mv{font-family:var(--font-mono);font-size:18px;font-weight:600;color:var(--text-primary)}
+.hero__meta .mk{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-muted)}
+
+/* section scaffolding */
+.section{margin-bottom:76px;scroll-margin-top:80px}
+.section__num{font-family:var(--font-mono);font-size:13px;font-weight:600;color:var(--accent);letter-spacing:.06em;margin-bottom:10px;display:flex;align-items:center;gap:10px}
+.section__num::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,var(--border-accent),transparent)}
+.section h2{font-family:var(--font-display);font-size:clamp(26px,4vw,36px);font-weight:700;line-height:1.15;letter-spacing:-.01em;margin-bottom:18px}
+.section h3{font-family:var(--font-display);font-size:21px;font-weight:600;margin:42px 0 14px;letter-spacing:-.01em}
+.section h4{font-family:var(--font-display);font-size:16px;font-weight:600;margin:26px 0 10px;color:var(--text-primary)}
+.section p{margin-bottom:18px;color:var(--text-secondary)}
+.section p strong{color:var(--text-primary);font-weight:600}
+.section ul,.section ol{margin:0 0 18px 0;padding-left:22px;color:var(--text-secondary)}
+.section li{margin-bottom:9px}
+.section li strong{color:var(--text-primary)}
+a.inl{color:var(--accent);text-decoration:none;border-bottom:1px solid var(--border-accent)}
+a.inl:hover{border-color:var(--accent)}
+.lead{font-size:19px;color:var(--text-primary)}
+
+/* inline term token */
+.t{font-family:var(--font-mono);font-size:.86em;color:var(--text-code);background:var(--bg-code);border:1px solid var(--border);border-radius:5px;padding:1px 6px;white-space:nowrap}
+
+/* callouts */
+.call{border-radius:var(--radius-md);padding:18px 20px;margin:24px 0;border:1px solid var(--border);background:var(--bg-card);position:relative}
+.call__h{font-family:var(--font-mono);font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.call p:last-child{margin-bottom:0}
+.call--key{background:var(--bg-highlight);border-color:var(--border-accent)}
+.call--key .call__h{color:var(--accent)}
+.call--warn{background:var(--orange-dim);border-color:rgba(255,169,77,.3)}
+.call--warn .call__h{color:var(--orange)}
+.call--flag{background:var(--red-dim);border-color:rgba(255,107,107,.3)}
+.call--flag .call__h{color:var(--red)}
+.call--note{background:var(--blue-dim);border-color:rgba(77,171,247,.28)}
+.call--note .call__h{color:var(--blue)}
+
+/* code */
+pre{background:var(--bg-code);border:1px solid var(--border);border-radius:var(--radius-md);padding:18px 20px;overflow-x:auto;margin:22px 0;font-family:var(--font-mono);font-size:13.5px;line-height:1.65;color:var(--text-code)}
+pre .c{color:var(--text-muted)}
+pre .k{color:var(--purple)}
+pre .s{color:var(--accent-dim)}
+pre .f{color:var(--blue)}
+
+/* tables */
+.tw{overflow-x:auto;margin:24px 0;border:1px solid var(--border);border-radius:var(--radius-md)}
+table{width:100%;border-collapse:collapse;font-size:14.5px;min-width:540px}
+th,td{padding:11px 14px;text-align:left;border-bottom:1px solid var(--border);vertical-align:top}
+th{font-family:var(--font-mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);background:var(--bg-secondary)}
+td{color:var(--text-secondary)}
+td strong{color:var(--text-primary)}
+tr:last-child td{border-bottom:none}
+td .t{white-space:normal}
+
+/* the week card */
+.weekcard{display:grid;gap:14px;margin:28px 0}
+.wc-row{display:grid;grid-template-columns:64px 1fr;gap:0;border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden;background:var(--bg-card)}
+.wc-day{display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-weight:600;font-size:13px;color:#0a0e17;letter-spacing:.04em}
+.wc-body{padding:14px 16px}
+.wc-body .wc-t{font-family:var(--font-display);font-weight:600;font-size:15.5px;color:var(--text-primary);margin-bottom:4px}
+.wc-body .wc-d{font-size:14px;color:var(--text-secondary)}
+.wc-body .wc-x{font-size:13.5px;color:var(--text-muted);margin-top:6px}
+.d-tue{background:var(--accent)}.d-wed{background:var(--orange)}.d-thu{background:var(--purple)}.d-mon{background:#2c3850;color:var(--text-secondary)}
+
+/* panel grid (lab + ai) */
+.panels{display:grid;gap:16px;margin:24px 0}
+@media(min-width:720px){.panels.two{grid-template-columns:1fr 1fr}}
+.panel{border:1px solid var(--border);border-radius:var(--radius-md);padding:18px 20px;background:var(--bg-card)}
+.panel__h{font-family:var(--font-mono);font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;margin-bottom:12px;color:var(--cyan)}
+.panel--lab{border-color:rgba(34,211,238,.28)}
+.panel--ai{border-color:rgba(177,151,252,.28)}
+.panel--ai .panel__h{color:var(--purple)}
+
+/* prereq cards */
+.prq{display:grid;gap:14px;margin:26px 0}
+.prq-card{border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:var(--radius-md);padding:16px 18px;background:var(--bg-card)}
+.prq-card h4{margin:0 0 6px;font-family:var(--font-display);font-size:16px}
+.prq-card .lvl{font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:2px 7px;border-radius:20px;margin-left:8px;vertical-align:middle}
+.lvl--core{background:var(--accent-glow);color:var(--accent)}
+.lvl--rust{background:var(--orange-dim);color:var(--orange)}
+.lvl--sol{background:var(--purple-dim);color:var(--purple)}
+.prq-card p{margin:0;font-size:14.5px}
+
+/* glossary blocks */
+.gl{margin:22px 0}
+.gl details{border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:10px;background:var(--bg-card);overflow:hidden}
+.gl details[open]{border-color:var(--border-accent)}
+.gl summary{cursor:pointer;padding:14px 18px;font-family:var(--font-display);font-weight:600;font-size:16px;list-style:none;display:flex;align-items:center;gap:10px;transition:background .15s}
+.gl summary:hover{background:var(--bg-card-hover)}
+.gl summary::-webkit-details-marker{display:none}
+.gl summary::before{content:'+';font-family:var(--font-mono);color:var(--accent);font-size:18px;width:16px}
+.gl details[open] summary::before{content:'-'}
+.gl summary .tag{font-family:var(--font-mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);margin-left:auto;font-weight:500}
+.gl .gl-body{padding:0 18px 18px;color:var(--text-secondary);font-size:15px}
+.gl .gl-body p{margin:10px 0;color:var(--text-secondary)}
+.gl .gl-body p:first-child{margin-top:0}
+
+/* ring diagram */
+.rings{display:grid;gap:12px;margin:26px 0;font-family:var(--font-mono);font-size:13px}
+@media(min-width:640px){.rings{grid-template-columns:1fr 1fr}}
+.ring{border:1px solid var(--border);border-radius:var(--radius-md);padding:14px 16px;background:var(--bg-card)}
+.ring .rn{font-weight:600;color:var(--text-primary);font-size:14px;margin-bottom:4px}
+.ring .rd{font-family:var(--font-body);font-size:13.5px;color:var(--text-secondary)}
+.ring .arrow{font-size:11px;letter-spacing:.05em;margin-top:8px;display:inline-block;padding:2px 8px;border-radius:20px}
+.ar-u2k{background:var(--blue-dim);color:var(--blue)}
+.ar-k2u{background:var(--accent-glow);color:var(--accent)}
+
+/* pipeline flow */
+.flow{margin:26px 0;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg-code);padding:20px 18px;overflow-x:auto}
+.flow pre{border:none;background:none;padding:0;margin:0;font-size:12.5px;color:var(--text-secondary)}
+.flow pre b{color:var(--accent);font-weight:600}
+.flow pre i{color:var(--purple);font-style:normal}
+.flow pre u{color:var(--orange);text-decoration:none}
+
+/* spectrum bars */
+.spec{display:grid;gap:10px;margin:24px 0}
+.spec-row{display:grid;grid-template-columns:130px 1fr;gap:14px;align-items:center}
+.spec-row .sl{font-family:var(--font-mono);font-size:13px;color:var(--text-primary)}
+.spec-bar{height:26px;border-radius:6px;display:flex;align-items:center;padding:0 10px;font-family:var(--font-mono);font-size:11px;color:#0a0e17;font-weight:600}
+
+footer{max-width:var(--max-width);margin:0 auto;padding:36px 24px 60px;border-top:1px solid var(--border);
+  font-family:var(--font-mono);font-size:12.5px;color:var(--text-muted);position:relative;z-index:1}
+footer a{color:var(--accent);text-decoration:none}
+footer .srcs{margin-top:14px;line-height:1.9}
+footer .srcs a{border-bottom:1px solid var(--border-accent)}
+
+.kicker{font-family:var(--font-mono);font-size:12px;letter-spacing:.06em;color:var(--text-muted);margin:-8px 0 18px}
+hr.div{border:none;border-top:1px solid var(--border);margin:40px 0}
+</style>
+</head>
+<body>
+<div class="glow"></div>
+
+<nav class="nav">
+  <div class="nav__left">
+    <span class="nav__tag">W2 // Kernel Bypass</span>
+    <span class="nav__title">pshred Ingress at Wire Speed</span>
+  </div>
+  <div class="nav__links">
+    <a href="#card">Card</a>
+    <a href="#thesis">Thesis</a>
+    <a href="#prereqs">Pre-reqs</a>
+    <a href="#jargon">Jargon</a>
+    <a href="#deep">Deep dives</a>
+    <a href="#lab">The lab</a>
+    <a href="#why">Why</a>
+  </div>
+</nav>
+<div class="progress" id="progress"></div>
+
+<main>
+
+  <header class="hero">
+    <div class="hero__eyebrow">Turbin3 Q2 2026 // Advanced SVM // Week 2</div>
+    <h1>Kernel bypass:<br><span class="g">pshred ingress at wire speed</span></h1>
+    <p class="hero__sub">Week 1 taught you why a packet is expensive to receive on Linux. <strong>Week 2 is about making it nearly free.</strong> You write a packet classifier that runs <em>inside</em> the kernel, hand chosen packets straight to userspace through shared memory with no syscall, and wire that fast path into how a Solana validator actually ingests transactions and shreds. This page decodes the whole week: every acronym on the card, the prerequisites you need walking in, and the reason any of it matters.</p>
+    <div class="hero__meta">
+      <div class="m"><span class="mv">XDP / AF_XDP</span><span class="mk">core tech</span></div>
+      <div class="m"><span class="mv">aya-rs</span><span class="mk">in rust</span></div>
+      <div class="m"><span class="mv">~14.8 Mpps</span><span class="mk">10GbE line rate</span></div>
+      <div class="m"><span class="mv">Double Zero</span><span class="mk">thu guest</span></div>
+    </div>
+  </header>
+
+  <!-- ============================ 01 THE CARD ============================ -->
+  <section class="section" id="card">
+    <div class="section__num">01</div>
+    <h2>The week, decoded</h2>
+    <p class="lead">Here is the actual W2 schedule card, translated from cohort shorthand into plain English. The whole week orbits one deliverable: the <strong>XDP pshred forwarder</strong> lab.</p>
+
+    <div class="weekcard">
+      <div class="wc-row">
+        <div class="wc-day d-mon">MON</div>
+        <div class="wc-body">
+          <div class="wc-t">Async self-study</div>
+          <div class="wc-d">Read the aya-rs book (XDP chapters). Read the kernel AF_XDP documentation. Study the Agave TPU receive-path source.</div>
+          <div class="wc-x">Translation: load the three reference texts you will be cross-checking all week. The aya book is your Rust-eBPF manual; the AF_XDP doc is the contract for the shared-memory rings; the Agave source is the real-world target you are speeding up.</div>
+        </div>
+      </div>
+      <div class="wc-row">
+        <div class="wc-day d-tue">TUE</div>
+        <div class="wc-body">
+          <div class="wc-t">XDP and eBPF (Rust)</div>
+          <div class="wc-d">Hook points, verifier rules, BPF map types. Write a pshred classifier with aya-rs. DPDK.</div>
+          <div class="wc-x">Translation: learn to attach a small sandboxed program to the earliest point in the network driver, get it past the kernel verifier, and use it to sort packets. DPDK is the "total bypass" alternative you contrast against.</div>
+        </div>
+      </div>
+      <div class="wc-row">
+        <div class="wc-day d-wed">WED</div>
+        <div class="wc-body">
+          <div class="wc-t">AF_XDP and io_uring. QUIC-only TPU ingestion</div>
+          <div class="wc-d">Move chosen packets into userspace through zero-copy rings. Relate it to io_uring. Look at how Solana ingests transactions over QUIC.</div>
+          <div class="wc-x">Translation: this is the actual kernel-bypass mechanism (AF_XDP) plus its storage/async cousin (io_uring), connected to Solana's real transaction-ingestion transport (QUIC).</div>
+        </div>
+      </div>
+      <div class="wc-row">
+        <div class="wc-day d-thu">THU</div>
+        <div class="wc-body">
+          <div class="wc-t">Guest: Double Zero</div>
+          <div class="wc-d">Engineers from the DoubleZero network.</div>
+          <div class="wc-x">Translation: DoubleZero runs a private fiber network for Solana validators with FPGA packet-filtering at the edge. Their production system is literally built on the tech you are learning. The most credible possible guest lecture on line-rate Solana networking.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panels two">
+      <div class="panel panel--lab">
+        <div class="panel__h">Weekly lab // the deliverable</div>
+        <p style="margin:0;color:var(--text-secondary);font-size:14.5px">Implement an <strong style="color:var(--text-primary)">XDP packet router</strong> that demultiplexes by a <strong style="color:var(--text-primary)">source-identifier field in the UDP payload header</strong>, using the <strong style="color:var(--text-primary)">pshred</strong> format from the Constellation spec as the target specification.</p>
+      </div>
+      <div class="panel panel--ai">
+        <div class="panel__h">Skill outcome // what "done" means</div>
+        <p style="margin:0;color:var(--text-secondary);font-size:14.5px">Write and attach XDP programs with aya-rs. Implement per-proposer pshred queues with AF_XDP. Measure the kernel-bypass gain against a baseline. Explain why Agave's shared-memory model avoids syscalls on the hot path.</p>
+      </div>
+    </div>
+
+    <div class="call call--note">
+      <div class="call__h">How this builds on Week 1</div>
+      <p>The W1 networking series already introduced <strong>eBPF, XDP, and AF_XDP</strong> at a conceptual level (parts 4-6). W2 does not re-teach the idea; it makes you <em>build</em> it: in Rust, past the verifier, at wire speed, demultiplexed per proposer, and bolted onto Solana's ingestion path. If a term below feels familiar, that is expected. This week is about the engineering, not the introduction.</p>
+    </div>
+  </section>
+
+  <!-- ============================ 02 THESIS ============================ -->
+  <section class="section" id="thesis">
+    <div class="section__num">02</div>
+    <h2>The one-sentence thesis</h2>
+    <p class="lead">A validator that wants to keep up with the cluster has to receive, sort, and account for hundreds of thousands of small UDP packets per second without the kernel's per-packet tax eating its CPU. Kernel bypass is how.</p>
+
+    <p>On a normal Linux socket, every received packet costs you a system call, a context switch, an <span class="t">sk_buff</span> allocation, a full trip through the TCP/IP and netfilter machinery, and at least one memory copy from kernel space into your buffer. At a few hundred thousand packets per second that overhead is your bottleneck, not the work you actually want to do (verifying signatures, reconstructing blocks, voting).</p>
+
+    <p><strong>Kernel bypass deletes that tax.</strong> You run a tiny program in the driver to decide a packet's fate before the kernel builds any state for it, and for the packets you want, you hand them to userspace through a region of memory the NIC writes into directly. No syscall per packet. No copy. The CPU you save goes back into the validator.</p>
+
+    <p>The course framing question ties the whole 6-week program to this:</p>
+    <div class="call call--key">
+      <div class="call__h">The framing question</div>
+      <p>"What does it take to engineer a system that processes erasure-coded <strong>pshreds</strong> from multiple concurrent proposers inside a 50ms window, achieves Alpenglow consensus in 150ms, and does all of this with enough determinism that a validator never misses a slot?"</p>
+    </div>
+    <p>Week 2 owns the first clause: <strong>getting those pshreds off the wire and sorted, fast.</strong></p>
+  </section>
+
+  <!-- ============================ 03 PREREQS ============================ -->
+  <section class="section" id="prereqs">
+    <div class="section__num">03</div>
+    <h2>What you need to know walking in</h2>
+    <p>These are the foundations the live sessions assume. None of them are optional, and most trace back to material you have already touched. Each card says what it is, why W2 needs it, and where to go deeper.</p>
+
+    <div class="prq">
+      <div class="prq-card">
+        <h4>The Linux UDP receive path <span class="lvl lvl--core">core</span></h4>
+        <p>What happens to a packet between the NIC and your code: DMA into a ring buffer, hardware interrupt, NAPI poll, <span class="t">sk_buff</span> build, protocol-stack traversal, socket-queue enqueue, and finally a <span class="t">recv()</span> copy into userspace. W2 is entirely about <em>removing</em> steps from this path, so you must know the path it is removing. <strong>This is W1 parts 2-3</strong> (the 15-step journey and the six cost centers); re-skim them if "NAPI" or "softirq" feel fuzzy.</p>
+      </div>
+      <div class="prq-card">
+        <h4>Why Solana chose UDP <span class="lvl lvl--sol">solana</span></h4>
+        <p>Solana propagates shreds over raw UDP because for block data, speed beats reliability: erasure coding tolerates loss, so a connectionless fire-and-forget transport with no handshake and no head-of-line blocking wins. That same property (unauthenticated UDP) is what makes ingestion a DoS target, which is why <em>transactions</em> later moved to QUIC. Knowing this split (UDP for shreds, QUIC for transactions) is required to place every W2 topic correctly. <strong>This is W1 part 1.</strong></p>
+      </div>
+      <div class="prq-card">
+        <h4>Solana ingestion vocabulary: TPU, TVU, shreds, Turbine <span class="lvl lvl--sol">solana</span></h4>
+        <p>The <strong>TPU</strong> (Transaction Processing Unit) is the leader's transaction-ingestion pipeline. The <strong>TVU</strong> (Transaction Validation Unit) is the non-leader's shred-ingestion pipeline. <strong>Shreds</strong> are the ~1228-byte fragments a block is split into. <strong>Turbine</strong> is the tree that propagates them. You will be tracing the TPU receive path "from NIC to replay," so these names must be reflexive. Section 5 below refreshes them.</p>
+      </div>
+      <div class="prq-card">
+        <h4>Rust without the standard library <span class="lvl lvl--rust">rust</span></h4>
+        <p>The kernel half of an eBPF program runs in a sandbox with <strong>512 bytes of stack, no heap, and no <span class="t">std</span></strong>. You write it in <span class="t">no_std</span> Rust: <span class="t">core</span> instead of <span class="t">std</span>, no allocations, no <span class="t">panic!</span>, every packet access wrapped in <span class="t">unsafe</span> with a manual bounds check. If you have only written <span class="t">std</span> Rust, spend an hour with <span class="t">#![no_std]</span> and raw-pointer access before Tuesday.</p>
+      </div>
+      <div class="prq-card">
+        <h4>Lock-free SPSC ring buffers <span class="lvl lvl--rust">rust</span></h4>
+        <p>Both AF_XDP and io_uring are built on <strong>single-producer / single-consumer ring buffers in shared memory</strong>: one side writes at a producer index, the other reads at a consumer index, and a memory fence (not a lock, not a syscall) synchronizes them. Understanding why an SPSC ring needs no lock, and what a producer/consumer index pair is, is the conceptual key to the whole week. (It also connects to the W1 lab's loom-tested lock-free work.)</p>
+      </div>
+      <div class="prq-card">
+        <h4>The NIC / DMA / queue model <span class="lvl lvl--core">core</span></h4>
+        <p>A modern NIC has <strong>multiple hardware receive queues</strong> and can DMA incoming frames straight into host memory. Features like RSS (receive-side scaling) and flow steering decide which queue a packet lands in. AF_XDP binds one socket to one queue, so "which queue" is a real design variable in your lab. You do not need to be a driver author, but you need the mental model: NIC -> DMA -> per-queue ring -> driver poll.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ 04 JARGON ============================ -->
+  <section class="section" id="jargon">
+    <div class="section__num">04</div>
+    <h2>Every acronym on the card</h2>
+    <p>The fast reference. Click any term to expand it. The heavy ones get their own full deep-dive in Section 05. Terms are grouped by the layer they live in, NIC-upward.</p>
+
+    <h3>Layer 1: programmable code inside the kernel</h3>
+    <div class="gl">
+      <details open>
+        <summary>eBPF <span class="tag">verifier &middot; maps &middot; JIT</span></summary>
+        <div class="gl-body">
+          <p><strong>extended Berkeley Packet Filter.</strong> A way to run small, sandboxed programs inside the Linux kernel without writing a kernel module or patching the kernel. You compile restricted C or Rust to eBPF bytecode (a 64-bit RISC-like instruction set), the kernel statically checks it for safety, JIT-compiles it to native machine code, and runs it at a "hook" point. eBPF powers modern Linux observability, security, and networking. For W2 it is the substrate: an XDP program <em>is</em> an eBPF program.</p>
+        </div>
+      </details>
+      <details>
+        <summary>The eBPF verifier <span class="tag">why your program gets rejected</span></summary>
+        <div class="gl-body">
+          <p>The static analyzer that every eBPF program must pass before it loads. It simulates all execution paths and proves the program is safe: no uninitialized reads, no out-of-bounds memory access, no unbounded loops, only whitelisted helper calls, stack under 512 bytes, complexity under ~1 million analyzed instructions. It is strict because your code runs with full kernel privilege; a bug would corrupt kernel memory or hang the machine. <strong>"Get it past the verifier" is the single hardest part of writing XDP.</strong> Full treatment in Section 05.</p>
+        </div>
+      </details>
+      <details>
+        <summary>BPF maps <span class="tag">array &middot; hash &middot; per-CPU &middot; ringbuf</span></summary>
+        <div class="gl-body">
+          <p>Typed key-value stores in kernel memory that an eBPF program shares with userspace (and with its own future invocations, since the program itself is stateless between packets). Key types you will meet: <span class="t">ARRAY</span> / <span class="t">HASH</span> (general storage), <span class="t">PERCPU_*</span> (one slot per CPU, so counters need no lock), <span class="t">RINGBUF</span> (stream events to userspace), and the star of this week, <span class="t">XSKMAP</span>.</p>
+        </div>
+      </details>
+      <details>
+        <summary>XSKMAP <span class="tag">the steering table</span></summary>
+        <div class="gl-body">
+          <p><span class="t">BPF_MAP_TYPE_XSKMAP</span>. A map whose entries are AF_XDP socket handles, indexed by an integer. When your XDP program calls <span class="t">bpf_redirect_map(&amp;xskmap, key, 0)</span>, the packet is steered into the AF_XDP socket sitting at that key. <strong>This is the mechanism your lab uses to send proposer A's pshreds to queue A and proposer B's to queue B.</strong> Only userspace can write this map, never the BPF program.</p>
+        </div>
+      </details>
+    </div>
+
+    <h3>Layer 2: the earliest hook (XDP) and how you write it (aya)</h3>
+    <div class="gl">
+      <details>
+        <summary>XDP <span class="tag">eXpress Data Path</span></summary>
+        <div class="gl-body">
+          <p>An eBPF program that runs in the NIC driver, in the poll loop, <strong>before the kernel allocates an <span class="t">sk_buff</span></strong>. It sees the raw packet first and returns a verdict: <span class="t">XDP_DROP</span> (kill it at line rate), <span class="t">XDP_PASS</span> (let the kernel handle it normally), <span class="t">XDP_TX</span> (bounce it back out), <span class="t">XDP_REDIRECT</span> (send it elsewhere: another NIC, another CPU, or an AF_XDP socket), or <span class="t">XDP_ABORTED</span> (error). Because it runs before any kernel state is built, dropping or redirecting here is extremely cheap. Section 05 has the full anatomy.</p>
+        </div>
+      </details>
+      <details>
+        <summary>Hook points / attach modes <span class="tag">native &middot; offload &middot; generic</span></summary>
+        <div class="gl-body">
+          <p>Where the XDP program physically runs. <strong>Native (driver) mode</strong> runs it in the NIC driver: fast, the real thing, needs driver support. <strong>Offloaded mode</strong> runs it on a SmartNIC's own chip: fastest, no host CPU at all, needs special hardware. <strong>Generic (SKB) mode</strong> runs it as a software shim after the <span class="t">sk_buff</span> already exists: works on any NIC, gives no speed benefit, good only for testing. Tuesday's "hook points" means choosing among these.</p>
+        </div>
+      </details>
+      <details>
+        <summary>aya-rs <span class="tag">eBPF in pure Rust</span></summary>
+        <div class="gl-body">
+          <p>A pure-Rust eBPF framework with no C, no libbpf, no LLVM at runtime. Your project splits into two crates: an <strong>eBPF crate</strong> compiled to the <span class="t">bpfel-unknown-none</span> target (<span class="t">no_std</span>, this is the kernel-side program, written with the <span class="t">#[xdp]</span> macro) and a <strong>userspace crate</strong> (normal <span class="t">std</span> Rust that loads the bytecode, attaches it, and reads the maps). "Write a pshred classifier with aya-rs" means: author both crates. Section 05 shows the skeleton.</p>
+        </div>
+      </details>
+    </div>
+
+    <h3>Layer 3: getting packets to userspace fast</h3>
+    <div class="gl">
+      <details>
+        <summary>AF_XDP <span class="tag">XDP sockets &middot; XSK</span></summary>
+        <div class="gl-body">
+          <p>A socket address family that lets userspace receive raw frames at high speed: an XDP program <span class="t">REDIRECT</span>s chosen packets into a shared-memory region the socket owns, skipping the rest of the kernel stack. It is built from a shared buffer (<strong>UMEM</strong>) and four lock-free rings (<strong>FILL, RX, TX, COMPLETION</strong>). This is <em>the</em> kernel-bypass mechanism of the week. Section 05 dissects the rings.</p>
+        </div>
+      </details>
+      <details>
+        <summary>UMEM <span class="tag">the shared packet pool</span></summary>
+        <div class="gl-body">
+          <p>User Memory. A contiguous region of <em>your</em> memory, sliced into equal 2KB or 4KB frames, registered with the kernel and memory-mapped so the NIC can DMA packets directly into it. This shared region is the "shared-memory model" the skill outcome asks you to explain: because the buffer is visible to both kernel and userspace, there is no copy across the boundary in zero-copy mode.</p>
+        </div>
+      </details>
+      <details>
+        <summary>The four rings <span class="tag">FILL &middot; RX &middot; TX &middot; COMPLETION</span></summary>
+        <div class="gl-body">
+          <p>Four single-producer/single-consumer ring buffers that coordinate UMEM frames without syscalls. <strong>FILL</strong>: you hand the kernel empty frames to fill. <strong>RX</strong>: the kernel hands you descriptors of received packets. <strong>TX</strong>: you hand the kernel frames to send. <strong>COMPLETION</strong>: the kernel hands back frames it finished sending. The "fill ring replenishment loop" in the AI section is the discipline of keeping FILL stocked. Section 05 diagrams all four.</p>
+        </div>
+      </details>
+      <details>
+        <summary>Fill ring starvation <span class="tag">the failure mode</span></summary>
+        <div class="gl-body">
+          <p>If you stop refilling the FILL ring with empty frames, the NIC has nowhere to DMA incoming packets and <strong>drops them at the hardware</strong>. Worse, because FILL is shared between the bypass path and the normal kernel path, an empty FILL ring can drop even <span class="t">XDP_PASS</span> traffic (your SSH session included). The Wednesday AI exercise is to construct exactly this scenario from a replenishment loop. Section 06.</p>
+        </div>
+      </details>
+      <details>
+        <summary>Zero-copy vs copy mode <span class="tag">driver-dependent</span></summary>
+        <div class="gl-body">
+          <p><strong>Zero-copy</strong>: the NIC DMAs the packet directly into your UMEM frame, no CPU copy. Needs driver support (i40e, ice, ixgbe, mlx5, and friends). <strong>Copy mode</strong>: the kernel copies the packet into UMEM for you. Still far faster than the full stack (no <span class="t">sk_buff</span>, no protocol traversal), just not zero-copy. You request a mode at bind time and fall back if the driver cannot.</p>
+        </div>
+      </details>
+      <details>
+        <summary>io_uring <span class="tag">the async cousin</span></summary>
+        <div class="gl-body">
+          <p>A Linux async I/O interface built on the <em>same idea</em> as AF_XDP: two shared-memory rings (a Submission Queue and a Completion Queue) so you batch many operations with few or zero syscalls. In <strong>SQPOLL</strong> mode a kernel thread polls your submission ring, so you submit work with <em>zero</em> syscalls, just a memory write. It generalizes beyond storage to network I/O and even zero-copy receive. W2 relates it to AF_XDP to show that "shared-memory rings to kill syscalls" is a general pattern, not an XDP quirk.</p>
+        </div>
+      </details>
+      <details>
+        <summary>DPDK <span class="tag">total bypass</span></summary>
+        <div class="gl-body">
+          <p>Data Plane Development Kit. The maximalist option: unbind the NIC from the kernel entirely, drive it from userspace with a poll-mode driver on hugepages, and reimplement networking yourself. Highest throughput, but the NIC vanishes from the kernel (<span class="t">tcpdump</span> and <span class="t">ethtool</span> can no longer see it), it pins whole cores at 100% CPU, and you own the whole stack. The contrast to AF_XDP (which keeps the NIC in the kernel and bypasses selectively) is a Tuesday talking point. Section 05 compares them.</p>
+        </div>
+      </details>
+    </div>
+
+    <h3>Layer 4: the Solana ingestion target</h3>
+    <div class="gl">
+      <details>
+        <summary>TPU <span class="tag">fetch &middot; sigverify &middot; banking &middot; broadcast</span></summary>
+        <div class="gl-body">
+          <p>Transaction Processing Unit: the leader-side pipeline that turns incoming transactions into a block. Stages, in order: <strong>Fetch</strong> (receive packets, now over QUIC), <strong>SigVerify</strong> (dedup + signature checks), <strong>Banking</strong> (schedule and execute, the core), <strong>Broadcast</strong> (split entries into shreds and propagate). "Trace the Agave tpu.rs receive path from NIC to replay" means following this. Section 05.</p>
+        </div>
+      </details>
+      <details>
+        <summary>QUIC-only TPU ingestion <span class="tag">UDP -> QUIC</span></summary>
+        <div class="gl-body">
+          <p>Solana originally took transactions over raw UDP, which was a trivial DoS target (no identity, no rate limit, no backpressure). It moved transaction ingestion to <strong>QUIC</strong> (the UDP-based transport behind HTTP/3) to get connection identity, per-sender rate limiting, and <strong>stake-weighted QoS</strong> (higher-staked peers get more throughput). The catch: handling thousands of QUIC handshakes at high rate is itself expensive, which is the motivation for kernel-bypass QUIC ingestion. Implemented with the <span class="t">quinn</span> crate in <span class="t">streamer/src/quic.rs</span>.</p>
+        </div>
+      </details>
+      <details>
+        <summary>Shreds <span class="tag">data &middot; coding &middot; Reed-Solomon</span></summary>
+        <div class="gl-body">
+          <p>The ~1228-byte fragments a block is split into for propagation. <strong>Data shreds</strong> carry transaction entries; <strong>coding shreds</strong> are Reed-Solomon parity that lets a receiver reconstruct missing data shreds (a typical set is 32 data + 32 coding, any 32 of 64 rebuild the block). Sent over UDP via <strong>Turbine</strong>, Solana's tree-based propagation protocol. Shreds are the model that <strong>pshreds</strong> are named after.</p>
+        </div>
+      </details>
+      <details>
+        <summary>pshred <span class="tag">Constellation / MCP</span></summary>
+        <div class="gl-body">
+          <p>"proposal shred." From Anza's <strong>Constellation</strong> proposal (Multiple Concurrent Proposers), not from DoubleZero. A proposer assembles transactions into a <strong>pslice</strong> every 50ms, erasure-codes it into <strong>256 pshreds</strong>, and sends one to each of 256 attesters (any 64 reconstruct the pslice). The "p" distinguishes them from Turbine shreds. <strong>Important: there is no public byte-level pshred wire format yet</strong>, so the "source-identifier field in the UDP payload" your lab demuxes on is a course-defined target spec, not a documented protocol field. Section 05 is explicit about this.</p>
+        </div>
+      </details>
+      <details>
+        <summary>Per-proposer queues <span class="tag">demultiplex by source</span></summary>
+        <div class="gl-body">
+          <p>In a multi-proposer world, up to ~16 proposers send pshreds to the same validator on the same port at once. If they all land in one socket buffer, one noisy proposer can crowd out the others, which defeats the censorship-resistance goal. <strong>Demultiplexing</strong> means reading a source identifier from each packet and routing it to a per-proposer queue (one AF_XDP socket per proposer) for isolation, QoS, and parallel draining. <strong>This is the lab.</strong></p>
+        </div>
+      </details>
+      <details>
+        <summary>DoubleZero <span class="tag">thursday guest</span></summary>
+        <div class="gl-body">
+          <p>A decentralized physical network ("DePIN for bandwidth") of private fiber links dedicated to high-performance blockchains, founded by Austin Federa (ex-Solana Foundation) and the Malbec Labs team. It filters spam and verifies signatures at the network edge on FPGAs, then carries clean traffic over dedicated low-jitter fiber, with multicast for shred distribution. It is integrated into Agave, Firedancer, and Jito. Section 07 explains why their engineers are the perfect W2 guests.</p>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <!-- ============================ 05 DEEP DIVES ============================ -->
+  <section class="section" id="deep">
+    <div class="section__num">05</div>
+    <h2>The heavy ones, expanded</h2>
+    <p>The five topics that carry the week and reward real understanding: the verifier, the XDP program itself, the AF_XDP rings, the bypass spectrum, and the Agave TPU path.</p>
+
+    <h3>5.1 &nbsp;The eBPF verifier: why your program keeps getting rejected</h3>
+    <p>An eBPF program runs with kernel privilege. There is no process boundary protecting the machine from it. So before the kernel will load your bytecode, the <strong>verifier</strong> walks every possible path through it and proves it cannot do harm. This is the gate the AI "Debug" exercise is about: you paste a rejection, and you learn which invariant you violated.</p>
+    <p>What the verifier enforces, in the terms you will see in error messages:</p>
+    <ul>
+      <li><strong>Bounded termination.</strong> No unbounded loops. Before kernel 5.3 every backward jump was rejected outright; since 5.3 the verifier accepts loops it can prove terminate, and <span class="t">bpf_loop()</span> gives an explicit bounded-iteration helper.</li>
+      <li><strong>Memory safety with manual bounds checks.</strong> You cannot dereference a packet pointer until you have proven, in code, that it is in range. The canonical pattern is <span class="t">if (data + sizeof(hdr) &gt; data_end) return XDP_DROP;</span> before reading <span class="t">hdr</span>. Forget it and the verifier rejects with an out-of-bounds access error.</li>
+      <li><strong>No uninitialized reads</strong> of registers or stack.</li>
+      <li><strong>512-byte stack ceiling.</strong> No heap at all. This is why the kernel crate is <span class="t">no_std</span> and allocation-free.</li>
+      <li><strong>Whitelisted helpers only.</strong> A program can only call the helper functions permitted for its program type. An XDP program cannot call helpers reserved for, say, tracing.</li>
+      <li><strong>Null checks after map lookups.</strong> <span class="t">bpf_map_lookup_elem()</span> returns a maybe-null pointer; use it without a null check and you are rejected.</li>
+      <li><strong>Complexity budget.</strong> The verifier caps total analyzed instructions around 1,000,000 (privileged) or 4,096 (unprivileged). A program too branchy to analyze within budget is rejected even if it is correct.</li>
+    </ul>
+    <div class="call call--key">
+      <div class="call__h">The mental shift</div>
+      <p>You are not writing code the compiler accepts. You are writing code a <em>theorem prover</em> accepts. A correct program can still be rejected for being too complex to prove correct. The skill is writing code that is obviously safe to the verifier: bounds-check immediately, keep branches shallow, prefer per-CPU maps, and read verifier output as a proof obligation you failed to discharge.</p>
+    </div>
+
+    <h3>5.2 &nbsp;The XDP program: context, bounds, verdict</h3>
+    <p>An XDP program receives one argument, a context (<span class="t">xdp_md</span>) carrying two pointers, <span class="t">data</span> (start of the packet) and <span class="t">data_end</span> (one past the end), plus the receive queue index. Your job: parse just enough of the headers to make a decision, bounds-checking every step, then return a verdict.</p>
+    <div class="tw"><table>
+      <thead><tr><th>Verdict</th><th>Value</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><span class="t">XDP_ABORTED</span></td><td>0</td><td>Program hit an error; drop + fire a tracepoint. Treat as a bug.</td></tr>
+        <tr><td><span class="t">XDP_DROP</span></td><td>1</td><td>Drop here, in the driver, before any kernel state. Line-rate DDoS filtering lives here.</td></tr>
+        <tr><td><span class="t">XDP_PASS</span></td><td>2</td><td>Hand to the normal kernel stack (possibly after you modified it).</td></tr>
+        <tr><td><span class="t">XDP_TX</span></td><td>3</td><td>Send it back out the same NIC (hairpin load balancers).</td></tr>
+        <tr><td><span class="t">XDP_REDIRECT</span></td><td>4</td><td>Send elsewhere via a map: another NIC (DEVMAP), another CPU (CPUMAP), or an AF_XDP socket (XSKMAP). <strong>Your lab returns this.</strong></td></tr>
+      </tbody>
+    </table></div>
+    <p class="kicker">Verdict integer values are consistent across sources but worth confirming against <span class="t">include/uapi/linux/bpf.h</span> in your kernel tree.</p>
+    <p>For the pshred forwarder, the body is: parse Ethernet -> IP -> UDP (bounds-checking at each layer), read the source-identifier field at the agreed offset in the UDP payload, map it to a queue index, and <span class="t">bpf_redirect_map(&amp;xsks, queue_idx, 0)</span>. That single redirect is what moves the packet into the right per-proposer AF_XDP socket.</p>
+
+    <h3>5.3 &nbsp;Writing it in Rust: the aya two-crate split</h3>
+    <p>aya splits the world cleanly. The kernel crate is the program that runs in the driver; the userspace crate is the control plane that loads it and owns the maps.</p>
+    <h4>Kernel crate (compiles to BPF bytecode, <span class="t">no_std</span>)</h4>
+<pre><span class="c">// #![no_std] #![no_main]  -- runs in the kernel sandbox</span>
+<span class="k">use</span> aya_ebpf::{macros::xdp, programs::XdpContext, bindings::xdp_action};
+
+<span class="f">#[xdp]</span>
+<span class="k">pub fn</span> <span class="f">pshred_router</span>(ctx: XdpContext) -&gt; u32 {
+    <span class="k">match</span> try_route(&amp;ctx) {
+        Ok(verdict) =&gt; verdict,
+        Err(_)      =&gt; xdp_action::XDP_ABORTED,
+    }
+}
+
+<span class="k">fn</span> <span class="f">try_route</span>(ctx: &amp;XdpContext) -&gt; Result&lt;u32, ()&gt; {
+    <span class="c">// bounds-check, parse eth/ip/udp, read source id,</span>
+    <span class="c">// then: xsks.redirect(queue_idx, 0)  -> XDP_REDIRECT</span>
+    Ok(xdp_action::XDP_PASS)
+}</pre>
+    <h4>Userspace crate (normal <span class="t">std</span> Rust)</h4>
+<pre><span class="k">let mut</span> bpf = aya::Ebpf::<span class="f">load</span>(include_bytes_aligned!(
+    <span class="s">"target/bpfel-unknown-none/release/pshred-router"</span>))?;
+<span class="k">let</span> prog: &amp;<span class="k">mut</span> Xdp = bpf.<span class="f">program_mut</span>(<span class="s">"pshred_router"</span>).unwrap().try_into()?;
+prog.<span class="f">load</span>()?;
+prog.<span class="f">attach</span>(<span class="s">"eth0"</span>, XdpFlags::default())?;  <span class="c">// native mode</span>
+<span class="c">// userspace also creates the AF_XDP sockets and writes them</span>
+<span class="c">// into the XSKMAP, one entry per proposer queue.</span></pre>
+    <div class="call call--note">
+      <div class="call__h">Why two crates</div>
+      <p>The kernel crate targets <span class="t">bpfel-unknown-none</span> and is linked by <span class="t">bpf-linker</span> into eBPF ELF bytecode, not a native binary. The userspace crate embeds that bytecode and is an ordinary async Rust program that can use tokio, read counters out of maps, and manage the sockets. The split mirrors the privilege boundary: untrusted-but-verified code in the kernel, full-power control plane in userspace.</p>
+    </div>
+
+    <h3>5.4 &nbsp;The four AF_XDP rings (and how to starve them)</h3>
+    <p>Once the XDP program redirects a packet into an AF_XDP socket, userspace picks it up through shared-memory rings. There are four, each single-producer/single-consumer, each just a producer index and a consumer index over a slice of shared memory. Two are for receive, two are for transmit.</p>
+    <div class="rings">
+      <div class="ring"><div class="rn">FILL ring</div><div class="rd">You hand the kernel addresses of <em>empty</em> UMEM frames: "here are buffers to put incoming packets in."</div><span class="arrow ar-u2k">userspace -&gt; kernel</span></div>
+      <div class="ring"><div class="rn">RX ring</div><div class="rd">The kernel hands you descriptors of <em>received</em> packets: which frame, what length. You read the packet straight out of UMEM.</div><span class="arrow ar-k2u">kernel -&gt; userspace</span></div>
+      <div class="ring"><div class="rn">TX ring</div><div class="rd">You hand the kernel frames to <em>transmit</em>.</div><span class="arrow ar-u2k">userspace -&gt; kernel</span></div>
+      <div class="ring"><div class="rn">COMPLETION ring</div><div class="rd">The kernel hands back frames it has <em>finished</em> sending, so you can reuse them.</div><span class="arrow ar-k2u">kernel -&gt; userspace</span></div>
+    </div>
+    <p>The receive cycle is a loop: drain RX, process each packet, and <strong>immediately recycle each consumed frame back onto FILL</strong> so the NIC always has somewhere to write. The flush of the producer index (a memory fence, not a syscall) is what makes the new entries visible to the other side.</p>
+    <div class="call call--warn">
+      <div class="call__h">Fill ring starvation: the Wednesday exercise</div>
+      <p>If your loop stops returning frames to FILL fast enough (held too long for processing, or an off-by-one on the producer index, or a flush that races the descriptor write), FILL empties. The NIC then has no buffer to DMA into and <strong>drops packets at the hardware</strong>. The subtle, dangerous part: FILL is shared with the kernel's own receive path, so starvation can drop even <span class="t">XDP_PASS</span> traffic, meaning your management SSH dies along with your pshreds. "Ask AI to construct a scenario that starves the ring" is asking you to reason precisely about producer/consumer index timing.</p>
+    </div>
+    <h4>Why this kills syscalls</h4>
+    <p>In a normal socket, every packet is a <span class="t">recv()</span>: one syscall, one context switch, a copy. With AF_XDP, the rings live in memory shared with the kernel. To get a packet you read the RX ring's producer index from memory; to give back a frame you write the FILL ring. No syscall on the hot path. The only syscalls are the optional <span class="t">poll()</span> / <span class="t">sendto()</span> "wakeup" kicks, and the <span class="t">XDP_USE_NEED_WAKEUP</span> flag lets you skip even those unless the kernel asks. <strong>That is exactly the "shared-memory model that avoids syscalls on the hot path" the skill outcome wants you to explain.</strong></p>
+
+    <h3>5.5 &nbsp;The bypass spectrum: socket -> io_uring -> AF_XDP -> DPDK</h3>
+    <p>These are not four unrelated tools; they are points on one axis of "how much of the kernel do you cut out." Cutting more buys throughput and costs you kernel features and operational simplicity.</p>
+    <div class="spec">
+      <div class="spec-row"><span class="sl">plain socket</span><div class="spec-bar" style="background:#3a4760;width:30%">1 syscall + copy per packet</div></div>
+      <div class="spec-row"><span class="sl">io_uring</span><div class="spec-bar" style="background:var(--blue);width:52%">batched / SQPOLL = ~0 syscalls, full kernel stack</div></div>
+      <div class="spec-row"><span class="sl">AF_XDP</span><div class="spec-bar" style="background:var(--accent);width:78%">selective bypass, kernel keeps the NIC</div></div>
+      <div class="spec-row"><span class="sl">DPDK</span><div class="spec-bar" style="background:var(--orange);width:100%">total bypass, userspace owns the NIC</div></div>
+    </div>
+    <div class="tw"><table>
+      <thead><tr><th></th><th>AF_XDP + XDP</th><th>DPDK</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Kernel in data path</strong></td><td>Minimal: XDP hook, then redirect</td><td>None at all</td></tr>
+        <tr><td><strong>NIC ownership</strong></td><td>Shared; <span class="t">tcpdump</span>/<span class="t">ethtool</span> still work</td><td>Exclusive; NIC vanishes from kernel</td></tr>
+        <tr><td><strong>Idle CPU</strong></td><td>Can sleep (need-wakeup)</td><td>100% (poll-mode driver spins)</td></tr>
+        <tr><td><strong>You must implement</strong></td><td>Just the fast path; kernel UDP still there for the rest</td><td>The whole networking stack</td></tr>
+        <tr><td><strong>Memory model</strong></td><td>UMEM, 2K/4K frames</td><td>Hugepage mempools</td></tr>
+        <tr><td><strong>Fits when</strong></td><td>Good throughput + keep the kernel ecosystem</td><td>Absolute max throughput, dedicated hardware</td></tr>
+      </tbody>
+    </table></div>
+    <p>For a Solana validator handling sub-1500-byte UDP shreds, AF_XDP is the pragmatic choice (it is what Firedancer uses and what Agave added in 2.3.8): you keep the kernel's UDP stack for control traffic and Rust's safe concurrency, and bypass only the hot path. DPDK would only win if AF_XDP's per-packet floor ever proved insufficient at validator packet sizes, which it has not. <strong>io_uring</strong> sits to the left as the proof that the ring pattern is general: SQPOLL eliminates submit syscalls the same way AF_XDP eliminates receive syscalls, while keeping the full kernel stack.</p>
+
+    <h3>5.6 &nbsp;The Agave TPU receive path: NIC to replay</h3>
+    <p>The "Navigate" exercise asks you to trace every channel from the NIC to replay in <span class="t">tpu.rs</span>. Here is the map. Leader path (transactions in over QUIC) on the left logic, validator path (shreds in over UDP) on the right.</p>
+    <div class="flow"><pre>            NIC
+             |
+   QUIC (transactions)          UDP (shreds, port 8002)
+             |                            |
+   <b>[QUIC streamer]</b>  quinn          <b>[ShredFetch]</b>  SO_REUSEPORT
+   streamer/src/quic.rs                   |
+             |  PacketBatch               |
+   <b>[FetchStage]</b>  batching        <b>[ShredVerify]</b>  leader sig / Merkle root
+   core/src/fetch_stage.rs                |
+             |  crossbeam ch              +--&gt; <u>[RetransmitStage]</u> forward down Turbine
+   <b>[SigVerifyStage]</b>  dedup,             |
+   ed25519 (CPU/GPU)            <b>[Blockstore]</b>  RocksDB, erasure recovery
+             |  verified batch            |
+   <b>[BankingStage]</b>  prio-graph      <b>[ReplayStage]</b>  execute txs, update bank, vote
+   scheduler, SVM, PoH record
+             |  entries
+   <b>[BroadcastStage]</b>  shredify,
+   Reed-Solomon, sign -&gt; Turbine</pre></div>
+    <p>The thing to internalize: the stages are wired by <strong>crossbeam channels</strong> (mostly unbounded mpsc), and the whole pipeline is what W2's kernel-bypass work feeds. Today, packets arrive through the kernel and get copied into <span class="t">PacketBatch</span>es at the fetch boundary. The W2 thesis is to replace that boundary with an AF_XDP path so packets land in userspace with no syscall and no copy, which is precisely how Firedancer's <span class="t">net</span> tile already works. Tracing the channels by hand is how you find where the fast path would splice in.</p>
+  </section>
+
+  <!-- ============================ 06 THE LAB ============================ -->
+  <section class="section" id="lab">
+    <div class="section__num">06</div>
+    <h2>The lab: an XDP pshred forwarder</h2>
+    <p class="lead">Build an XDP program that reads a source-identifier field from each pshred's UDP payload and routes it to a per-proposer AF_XDP queue. That is the entire deliverable, and every concept above is a piece of it.</p>
+
+    <div class="call call--flag">
+      <div class="call__h">Honesty about the "target specification"</div>
+      <p>The card says to use "the pshred format described in the Constellation whitepaper as the target specification." Two corrections from primary sources: (1) <strong>Constellation is Anza's proposal, not a DoubleZero document.</strong> There is no "DoubleZero Constellation whitepaper." (2) <strong>Constellation describes pshreds conceptually</strong> (a pslice erasure-coded into 256 pieces, 64-of-256 recovery, with a cryptographic commitment) <strong>but publishes no byte-level wire format.</strong> So the "source-identifier field at offset N in the UDP payload" is a <em>course-defined target spec for the exercise</em>, architecturally coherent with how multi-proposer routing would work, not a field you will find documented in any spec today. Build to the spec the cohort gives you; do not invent protocol bytes and present them as canonical.</p>
+    </div>
+
+    <h3>What you are actually building</h3>
+    <div class="flow"><pre>  16 proposers all send pshreds to the same UDP port
+                      |
+                      v
+            <b>[ XDP program in the driver ]</b>
+            parse eth/ip/udp (bounds-checked)
+            read source_id at offset N
+            queue = source_id % N_QUEUES
+            bpf_redirect_map(&amp;xsks, queue, 0)
+              |        |        |        |
+              v        v        v        v
+           XSK 0    XSK 1    XSK 2   ...  XSK 15      &lt;- one AF_XDP socket
+              |        |        |        |               per proposer queue
+           drain    drain    drain    drain           (isolated, parallel)</pre></div>
+
+    <h3>The build, in the order the week teaches it</h3>
+    <ol>
+      <li><strong>Tuesday:</strong> write the XDP classifier in aya. Parse headers, read the source id, get it past the verifier (this is where you will spend real time). Test in generic/SKB mode first because it works on any NIC.</li>
+      <li><strong>Wednesday:</strong> stand up the AF_XDP side. Allocate UMEM, create one socket per proposer queue, write each socket's handle into the XSKMAP so the redirect lands. Write the receive loop and the FILL-ring replenishment discipline that does not starve.</li>
+      <li><strong>Measure:</strong> run a packet generator and compare pps and latency against a plain <span class="t">recvmmsg()</span> UDP baseline. The skill outcome wants the <em>gain quantified</em>, not asserted. Expect the line-rate references below as your ceiling.</li>
+      <li><strong>Explain:</strong> be able to say, in one breath, why the shared-memory rings remove the syscall and copy that the baseline pays per packet.</li>
+    </ol>
+
+    <h4>Numbers to calibrate against</h4>
+    <ul>
+      <li><strong>10GbE line rate, 64-byte frames:</strong> ~14.88 million packets/sec. That is the physical ceiling you are chasing.</li>
+      <li><strong>Plain socket baseline:</strong> roughly 1-2 Mpps before the CPU saturates on syscall + copy overhead.</li>
+      <li><strong>AF_XDP zero-copy:</strong> ~16.9 Mpps rxdrop in the canonical 2018 Linux Plumbers benchmark (40GbE, i40e); real single-core 10GbE setups land around 10-11 Mpps.</li>
+      <li><strong>XDP_DROP alone:</strong> ~26 Mpps/core, the upper bound on how fast the XDP layer itself can run before any userspace handling.</li>
+    </ul>
+    <p class="kicker">Treat editorial latency tables (socket vs io_uring vs AF_XDP vs DPDK in microseconds) as directional. The ordering is reliable; the exact figures depend heavily on NIC, kernel, and NUMA layout. Always cite your own measured baseline.</p>
+
+    <h3>The three AI exercises, decoded</h3>
+    <div class="panels">
+      <div class="panel">
+        <div class="panel__h">Debug // the verifier</div>
+        <p style="margin:0;font-size:14.5px;color:var(--text-secondary)">Paste the full eBPF verifier rejection. Ask for the specific constraint violated and three ranked fixes to test. <strong style="color:var(--text-primary)">Why this works:</strong> verifier output is dense and points at an instruction, not a cause. Forcing a ranked hypothesis list turns a wall of register-state text into a debugging plan. This is the single highest-leverage AI use of the week.</p>
+      </div>
+      <div class="panel">
+        <div class="panel__h">Verify // ring starvation</div>
+        <p style="margin:0;font-size:14.5px;color:var(--text-secondary)">Paste your fill-ring replenishment loop. Ask AI to construct a scenario that starves the ring. <strong style="color:var(--text-primary)">Why this works:</strong> starvation is a timing bug between producer and consumer indices; it will not show up in a happy-path test. Asking for an adversarial schedule surfaces the off-by-one or the missed flush before production traffic does.</p>
+      </div>
+      <div class="panel">
+        <div class="panel__h">Navigate // tpu.rs</div>
+        <p style="margin:0;font-size:14.5px;color:var(--text-secondary)">Paste the Agave tpu.rs receive path. Ask AI to trace every channel from NIC to replay. <strong style="color:var(--text-primary)">Why this works:</strong> the pipeline is wired by many crossbeam channels across files. A traced channel map tells you exactly where an AF_XDP fast path would splice in, which is the point of learning the path at all.</p>
+      </div>
+    </div>
+    <div class="call call--note">
+      <div class="call__h">Program-wide trust rule (carry it into this lab)</div>
+      <p>Per the cohort's AI trust calibration: <strong>never</strong> trust an AI claim about XDP verifier constraint satisfaction, kernel API versions, struct offsets, or <span class="t">unsafe</span> correctness without verifying by hand. Use AI to generate hypotheses and traces; verify the kernel-boundary specifics against the actual headers, docs, and a running verifier.</p>
+    </div>
+  </section>
+
+  <!-- ============================ 07 WHY ============================ -->
+  <section class="section" id="why">
+    <div class="section__num">07</div>
+    <h2>Why this is worth a whole week</h2>
+    <p class="lead">Because Solana's bottleneck has moved from compute to communication, and this is the layer where that fight is being won.</p>
+    <p>The performance of a modern processor is rarely limited by its cores; it is limited by moving data between them. The same is now true of Solana: validators are increasingly bottlenecked by bandwidth and latency between nodes, not by execution inside them. That is why a stack of independent efforts is converging on the network layer, and they compound:</p>
+    <div class="tw"><table>
+      <thead><tr><th>Layer</th><th>Project</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Network underlay</strong></td><td>DoubleZero</td><td>Private fiber, FPGA edge filtering, multicast shred delivery, jitter removal</td></tr>
+        <tr><td><strong>Packet ingestion</strong></td><td>XDP / AF_XDP</td><td>Kernel bypass, zero-copy NIC-to-validator, 10-100x less per-packet CPU. <strong>This week.</strong></td></tr>
+        <tr><td><strong>Validator client</strong></td><td>Firedancer</td><td>Tile architecture, AF_XDP-native, custom QUIC, targeting 1M TPS</td></tr>
+        <tr><td><strong>Tx transport</strong></td><td>QUIC + SWQoS</td><td>Identity, rate limiting, stake-weighted admission (replaced raw UDP)</td></tr>
+        <tr><td><strong>Consensus</strong></td><td>Alpenglow</td><td>Votor + Rotor, ~150ms finality, single-hop propagation</td></tr>
+        <tr><td><strong>Market structure</strong></td><td>Constellation</td><td>Multiple concurrent proposers, censorship resistance via attester quorum. <strong>Source of "pshred."</strong></td></tr>
+      </tbody>
+    </table></div>
+    <p><strong>Why DoubleZero is the perfect Thursday guest:</strong> their production network is this stack, made physical. They filter spam and verify signatures at the edge on FPGAs (hardware packet processing, the sibling of what XDP does in software), carry clean traffic over dedicated fiber, and use multicast for shred fanout. Anza even extended Agave's XDP to work over GRE tunnels specifically so validators can combine XDP's speed with DoubleZero's low-jitter backbone (the "IBRL" mode: Increase Bandwidth, Reduce Latency). The end-to-end path they can speak to is exactly the one you are building a slice of: internet edge -> FPGA filter -> GRE tunnel -> XDP ingress at the validator NIC -> AF_XDP zero-copy into the validator process.</p>
+    <p><strong>And why it matters for an infra-tier career:</strong> app-tier Solana work stops at the program boundary. This is the work below the API line, where the validator earns or loses its slot. Being able to write a verified XDP classifier, reason about ring starvation, and trace the Agave ingestion path cold is the difference between using the validator and being able to make it faster. That is the whole point of the cohort, and Week 2 is where the systems-programming muscle gets built.</p>
+    <div class="call call--key">
+      <div class="call__h">The one-line takeaway</div>
+      <p>Week 2 = learn to receive a packet almost for free (XDP decides its fate in the driver, AF_XDP hands it to you through shared memory with no syscall), do it in verified Rust with aya, and wire it into how Solana actually ingests pshreds and transactions, so a validator can keep up with the cluster at wire speed.</p>
+    </div>
+  </section>
+
+  <hr class="div">
+  <p class="kicker" style="text-align:center">W2 of 6 // next: MCPs, Constellation as an Alpenglow preprocessor, FEC/erasure coding, QUIC. Guest: Max Resnick (Anza).</p>
+
+</main>
+
+<footer>
+  Turbin3 Q2 2026 // Advanced SVM cohort // Allen Saji
+  &nbsp;&middot;&nbsp; <a href="https://allensaji.dev">allensaji.dev</a>
+  &nbsp;&middot;&nbsp; <a href="https://x.com/SajiBhai011">@SajiBhai011</a>
+  <div class="srcs">
+    <strong style="color:var(--text-secondary)">Primary sources:</strong><br>
+    <a href="https://docs.kernel.org/bpf/verifier.html">kernel.org: eBPF verifier</a> &middot;
+    <a href="https://docs.kernel.org/networking/af_xdp.html">kernel.org: AF_XDP</a> &middot;
+    <a href="https://docs.kernel.org/bpf/map_xskmap.html">kernel.org: XSKMAP</a> &middot;
+    <a href="https://aya-rs.dev/book/">aya-rs book</a> &middot;
+    <a href="https://lwn.net/Articles/745934/">LWN: introducing AF_XDP</a> &middot;
+    <a href="https://man7.org/linux/man-pages/man2/io_uring_setup.2.html">io_uring_setup(2)</a> &middot;
+    <a href="https://doc.dpdk.org/guides/linux_gsg/linux_drivers.html">DPDK: Linux drivers</a> &middot;
+    <a href="https://docs.anza.xyz/validator/tpu">Anza: TPU docs</a> &middot;
+    <a href="https://github.com/anza-xyz/agave/blob/master/streamer/src/quic.rs">agave/streamer/src/quic.rs</a> &middot;
+    <a href="https://www.helius.dev/blog/solana-shreds">Helius: shreds</a> &middot;
+    <a href="https://www.helius.dev/blog/constellation">Helius: Constellation (MCP)</a> &middot;
+    <a href="https://constellation.anza.xyz/">Anza: Constellation tracker</a> &middot;
+    <a href="https://malbeclabs.com/whitepaper.pdf">DoubleZero whitepaper</a> &middot;
+    <a href="https://docs.firedancer.io/guide/internals/net_tile.html">Firedancer: net tile</a> &middot;
+    <a href="https://starke.finance/blog/accelerating-packet-processing-xdp-in-solana-validator-clients">Starke: XDP in Solana clients</a>
+  </div>
+</footer>
+
+<script>
+// reading progress
+const bar=document.getElementById('progress');
+const links=[...document.querySelectorAll('.nav__links a')];
+const secs=links.map(a=>document.querySelector(a.getAttribute('href')));
+function onScroll(){
+  const h=document.documentElement;
+  const st=h.scrollTop, max=h.scrollHeight-h.clientHeight;
+  bar.style.width=(max>0?(st/max*100):0)+'%';
+  let idx=0;
+  secs.forEach((s,i)=>{ if(s&&s.getBoundingClientRect().top<=120) idx=i; });
+  links.forEach((a,i)=>a.classList.toggle('active',i===idx));
+}
+document.addEventListener('scroll',onScroll,{passive:true});
+onScroll();
+</script>
+</body>
+</html>
