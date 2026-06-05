@@ -32,6 +32,16 @@ const TOPICS = [
     name: 'Block Building on Solana',
     tagline: 'How a block actually gets built, and where MEV infrastructure plugs in.',
   },
+  {
+    dir: 'banking-jitter',
+    name: 'Banking Stage Jitter',
+    tagline: 'What the W1 jitter lab measures against Alpenglow\'s latency budget, from zero.',
+  },
+  {
+    dir: 'kernel-bypass-pshred',
+    name: 'Kernel Bypass: pshred Ingress',
+    tagline: 'Receiving packets at wire speed with XDP and AF_XDP, wired into Solana ingestion.',
+  },
 ];
 
 // ---------------------------------------------------------------------------
