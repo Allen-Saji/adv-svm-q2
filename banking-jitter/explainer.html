@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>The Banking Jitter Lab, Explained From Zero</title>
+<meta name="description" content="A plain-language explainer of the Advanced SVM banking-stage jitter lab: what it measures, why, and every prerequisite (leader, banking stage, consumer, Votor's deadline, jitter, tokio vs OS threads) explained from scratch.">
+<meta name="note-title" content="Banking Jitter, From Zero">
+<meta name="note-order" content="1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0c11;
+    --bg-elevated:#11141c;
+    --bg-soft:#161a24;
+    --border:#222837;
+    --border-soft:#1b2030;
+    --text:#e6e8ee;
+    --text-dim:#9ba3b4;
+    --text-faint:#6a7383;
+    --accent:#9945ff;
+    --accent-2:#14f195;
+    --accent-warm:#ffb454;
+    --accent-red:#f7657c;
+    --accent-blue:#56b6ff;
+    --code-bg:#0d1018;
+    --pure:radial-gradient(120% 80% at 50% 0%,rgba(20,241,149,.06),transparent 60%);
+    --maxw:880px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:'Inter',system-ui,-apple-system,sans-serif;
+    background:var(--bg); color:var(--text);
+    font-size:16px; line-height:1.65;
+    -webkit-font-smoothing:antialiased;
+  }
+  body::before{content:"";position:fixed;inset:0;pointer-events:none;background:var(--pure);z-index:0}
+  .layout{display:grid;grid-template-columns:minmax(0,1fr) 240px;gap:64px;max-width:1240px;margin:0 auto;padding:48px 32px 120px;position:relative;z-index:1}
+  @media (max-width:960px){.layout{grid-template-columns:1fr;gap:32px;padding:32px 20px 80px}aside{display:none}}
+  main{max-width:var(--maxw);min-width:0}
+
+  .eyebrow{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--text-faint);margin-bottom:24px}
+  .eyebrow span{color:var(--accent-2)}
+  h1{font-size:48px;line-height:1.08;font-weight:600;letter-spacing:-.025em;margin:0 0 20px;background:linear-gradient(180deg,#fff,#cfd4e0);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{font-size:19px;color:var(--text-dim);line-height:1.6;max-width:680px;margin:0 0 40px}
+  .meta-row{display:flex;gap:16px;flex-wrap:wrap;padding:14px 18px;border:1px solid var(--border);background:var(--bg-elevated);border-radius:10px;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text-dim);margin-bottom:48px}
+  .meta-row b{color:var(--text);font-weight:500}
+  .meta-row span+span{padding-left:16px;border-left:1px solid var(--border)}
+
+  h2{font-size:28px;line-height:1.2;font-weight:600;letter-spacing:-.02em;margin:72px 0 8px;color:#fff;scroll-margin-top:24px}
+  h2 .num{font-family:'JetBrains Mono',monospace;color:var(--accent-2);font-size:13px;font-weight:500;margin-right:14px;vertical-align:middle;letter-spacing:.05em}
+  h2 + .sub{color:var(--text-dim);font-size:15px;margin:0 0 24px;max-width:640px}
+  h3{font-size:18px;font-weight:600;margin:32px 0 10px;color:#fff;letter-spacing:-.01em}
+  h4{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--accent-2);margin:24px 0 10px;font-family:'JetBrains Mono',monospace}
+  p{margin:0 0 14px}
+  a{color:var(--accent-blue);text-decoration:none;border-bottom:1px solid rgba(86,182,255,.3)}
+  strong{color:#fff;font-weight:600}
+  em{color:var(--text);font-style:italic}
+
+  code{font-family:'JetBrains Mono',monospace;font-size:.85em;background:var(--code-bg);border:1px solid var(--border-soft);color:#d8dde8;padding:1px 6px;border-radius:4px}
+  pre{background:var(--code-bg);border:1px solid var(--border);border-radius:10px;padding:14px 16px;overflow-x:auto;font-size:12px;line-height:1.55;margin:14px 0}
+  pre code{background:none;border:0;padding:0;color:#d8dde8}
+
+  .callout{margin:20px 0;border:1px solid var(--border);border-left:3px solid var(--accent-2);background:var(--bg-elevated);border-radius:6px;padding:16px 20px}
+  .callout .label{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent-2);font-weight:600;margin-bottom:6px;display:block}
+  .callout.warm{border-left-color:var(--accent-warm)}
+  .callout.warm .label{color:var(--accent-warm)}
+  .callout.blue{border-left-color:var(--accent-blue)}
+  .callout.blue .label{color:var(--accent-blue)}
+  .callout p:last-child{margin-bottom:0}
+
+  .analogy{margin:20px 0;border:1px solid var(--border);border-left:3px solid var(--accent);background:linear-gradient(180deg,rgba(153,69,255,.06),transparent);border-radius:6px;padding:16px 20px}
+  .analogy .label{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);font-weight:600;margin-bottom:6px;display:block}
+  .analogy p:last-child{margin-bottom:0}
+
+  .table-wrap{margin:20px 0;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--border-soft);vertical-align:top}
+  th{background:var(--bg-elevated);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim)}
+  tr:last-child td{border-bottom:0}
+  td code{font-size:11px}
+
+  .diagram{background:var(--bg-elevated);border:1px solid var(--border);border-radius:14px;padding:24px;margin:24px 0;overflow-x:auto}
+  .diagram svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .diagram .caption{margin-top:14px;font-size:12px;color:var(--text-dim);text-align:center;line-height:1.5}
+
+  aside{position:sticky;top:24px;align-self:start;max-height:calc(100vh - 48px);overflow-y:auto}
+  .toc-title{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--text-faint);margin-bottom:14px}
+  .toc{list-style:none;padding:0;margin:0;font-size:13px;line-height:1.5}
+  .toc li{margin:0;padding:5px 0;border-left:1px solid var(--border-soft)}
+  .toc a{display:block;padding-left:14px;color:var(--text-dim);border:0}
+  .toc a:hover{color:var(--accent-2)}
+  .toc .num{font-family:'JetBrains Mono',monospace;color:var(--text-faint);margin-right:6px;font-size:11px}
+
+  svg text{font-family:'Inter',sans-serif;fill:var(--text)}
+  .svg-mono{font-family:'JetBrains Mono',monospace !important;font-size:11px}
+  .svg-dim{fill:var(--text-dim)}
+  .svg-faint{fill:var(--text-faint)}
+
+  .pill{display:inline-block;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.08em;text-transform:uppercase;padding:2px 8px;border-radius:3px;margin-left:8px;vertical-align:middle;background:rgba(20,241,149,.12);color:var(--accent-2);border:1px solid rgba(20,241,149,.3)}
+
+  blockquote{margin:24px 0;padding:0 0 0 24px;border-left:3px solid var(--accent-2);font-size:17px;line-height:1.5;color:#fff;font-style:italic}
+
+  hr{border:0;height:1px;background:linear-gradient(90deg,transparent,var(--border),transparent);margin:48px 0}
+  footer{margin-top:80px;padding-top:32px;border-top:1px solid var(--border);font-size:13px;color:var(--text-faint)}
+</style>
+</head>
+<body>
+
+<div class="layout">
+<main>
+
+  <div class="eyebrow"><span>●</span> Advanced SVM · Week 1 weekend lab · plain-language companion</div>
+  <h1>The Banking Jitter Lab, Explained From Zero</h1>
+  <p class="lede">No prior knowledge assumed. We start with "what is a block," build up every word in the assignment one at a time, and only at the very end show what the lab actually measures. If a term feels heavy, there is an analogy right next to it.</p>
+
+  <div class="meta-row">
+    <span><b>Level:</b> beginner</span>
+    <span><b>Assumes:</b> nothing</span>
+    <span><b>Read time:</b> ~18 min</span>
+    <span><b>Goal:</b> understand the lab</span>
+  </div>
+
+  <div class="callout">
+    <span class="label">The lab in one sentence</span>
+    <p>Solana gives the computer that builds a block a strict time budget. This lab builds a <strong>stopwatch</strong> that times the block-building code against that budget, and then figures out <em>why</em> the time sometimes wobbles.</p>
+  </div>
+
+  <!-- ============ 00 ============ -->
+  <h2 id="what"><span class="num">00</span>What are we even building?</h2>
+  <p class="sub">The 30-second version, before any jargon.</p>
+
+  <p>You are building a small <strong>measurement program</strong> (the word for this is a <em>harness</em>). It does three things:</p>
+
+  <ul class="steps">
+    <li data-n="1"><b>Run the real Solana block-building code</b> in a controlled way, over and over.</li>
+    <li data-n="2"><b>Time it</b> with a stopwatch on each run.</li>
+    <li data-n="3"><b>Compare</b> that time against the deadline Solana's consensus rules allow, and explain any spikes.</li>
+  </ul>
+
+  <p>That's it. Everything else in this note is just defining the words: "block-building code," "deadline," and "why it spikes." Let's earn each one.</p>
+
+  <div class="analogy">
+    <span class="label">Hold this analogy the whole way</span>
+    <p>Think of a <strong>restaurant kitchen during a lunch rush</strong>. Every 400 milliseconds the kitchen must plate one finished dish (a <em>block</em>) and pass it down the line. The "banking stage" is the cook. "Jitter" is when one dish suddenly takes way longer than the others. Your lab is the kitchen timer that catches the slow plate and asks: was the cook waiting for the oven, waiting for a free counter, or waiting for ingredients to be delivered?</p>
+  </div>
+
+  <!-- ============ 01 ============ -->
+  <h2 id="block"><span class="num">01</span>Prerequisite: blocks, slots, and the leader</h2>
+  <p class="sub">Who builds a block, and how often.</p>
+
+  <p>A blockchain is a list of <strong>blocks</strong>. Each block is a batch of transactions that everyone agrees happened. On Solana, a new block is produced roughly every <strong>400 milliseconds</strong>. That fixed 400 ms window is called a <strong>slot</strong>.</p>
+
+  <p>At any moment, one specific validator (one computer in the network) is chosen to build the block for the current slot. That chosen computer is the <strong>leader</strong>. The leadership rotates: you are leader for a few slots, then someone else is, on a published schedule.</p>
+
+  <div class="callout blue">
+    <span class="label">The key constraint</span>
+    <p>The leader has only one slot (~400 ms) to collect transactions, run them, and ship the finished block. Miss that window and the block is late or skipped. <strong>This deadline is the entire reason your lab exists.</strong></p>
+  </div>
+
+  <div class="diagram">
+    <svg viewBox="0 0 760 150" width="760">
+      <text x="0" y="20" font-size="12" class="svg-dim svg-mono">time -></text>
+      <!-- slots -->
+      <rect x="40" y="40" width="160" height="60" rx="8" fill="#161a24" stroke="#9945ff" stroke-opacity=".5"/>
+      <rect x="210" y="40" width="160" height="60" rx="8" fill="#161a24" stroke="#222837"/>
+      <rect x="380" y="40" width="160" height="60" rx="8" fill="#161a24" stroke="#222837"/>
+      <rect x="550" y="40" width="160" height="60" rx="8" fill="#161a24" stroke="#222837"/>
+      <text x="120" y="66" text-anchor="middle" font-size="12" fill="#fff" font-weight="600">Slot N</text>
+      <text x="120" y="84" text-anchor="middle" font-size="10" class="svg-dim">you are leader</text>
+      <text x="290" y="66" text-anchor="middle" font-size="12" class="svg-dim">Slot N+1</text>
+      <text x="460" y="66" text-anchor="middle" font-size="12" class="svg-dim">Slot N+2</text>
+      <text x="630" y="66" text-anchor="middle" font-size="12" class="svg-dim">Slot N+3</text>
+      <text x="120" y="124" text-anchor="middle" font-size="11" class="svg-mono" fill="#14f195">~400 ms each</text>
+    </svg>
+    <div class="caption">Time is chopped into fixed 400 ms slots. In your slot, you are the leader and must produce one block before the window closes.</div>
+  </div>
+
+  <!-- ============ 02 ============ -->
+  <h2 id="banking"><span class="num">02</span>Prerequisite: the banking stage</h2>
+  <p class="sub">The part of the leader that actually builds the block.</p>
+
+  <p>Inside the leader, a transaction passes through an assembly line called the <strong>TPU</strong> (Transaction Processing Unit). Each station does one job:</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 760 120" width="760">
+      <defs><marker id="ag" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#14f195"/></marker></defs>
+      <g font-size="11">
+        <rect x="20"  y="40" width="120" height="48" rx="6" fill="#0d1018" stroke="#56b6ff" stroke-opacity=".4"/>
+        <text x="80"  y="60" text-anchor="middle" fill="#fff">Fetch</text>
+        <text x="80"  y="76" text-anchor="middle" class="svg-dim" font-size="9">receive packets</text>
+        <rect x="160" y="40" width="120" height="48" rx="6" fill="#0d1018" stroke="#56b6ff" stroke-opacity=".4"/>
+        <text x="220" y="60" text-anchor="middle" fill="#fff">SigVerify</text>
+        <text x="220" y="76" text-anchor="middle" class="svg-dim" font-size="9">check signatures</text>
+        <rect x="300" y="36" width="140" height="56" rx="6" fill="#1c1530" stroke="#9945ff" stroke-width="1.4"/>
+        <text x="370" y="58" text-anchor="middle" fill="#fff" font-weight="600">Banking stage</text>
+        <text x="370" y="76" text-anchor="middle" fill="#9945ff" font-size="9">★ run + build the block</text>
+        <rect x="460" y="40" width="120" height="48" rx="6" fill="#0d1018" stroke="#56b6ff" stroke-opacity=".4"/>
+        <text x="520" y="60" text-anchor="middle" fill="#fff">PoH</text>
+        <text x="520" y="76" text-anchor="middle" class="svg-dim" font-size="9">stamp the order</text>
+        <rect x="600" y="40" width="140" height="48" rx="6" fill="#0d1018" stroke="#14f195" stroke-opacity=".5"/>
+        <text x="670" y="60" text-anchor="middle" fill="#fff">Broadcast</text>
+        <text x="670" y="76" text-anchor="middle" class="svg-dim" font-size="9">send to network</text>
+        <line x1="140" y1="64" x2="160" y2="64" stroke="#14f195" marker-end="url(#ag)"/>
+        <line x1="280" y1="64" x2="300" y2="64" stroke="#14f195" marker-end="url(#ag)"/>
+        <line x1="440" y1="64" x2="460" y2="64" stroke="#14f195" marker-end="url(#ag)"/>
+        <line x1="580" y1="64" x2="600" y2="64" stroke="#14f195" marker-end="url(#ag)"/>
+      </g>
+    </svg>
+    <div class="caption">The leader's assembly line (TPU). The <span style="color:#9945ff">banking stage</span> is the star: it is where transactions are actually executed and packed into the block. (PoH is drawn as its own box for clarity, but the stamping actually happens <em>inside</em> the banking stage: it is the <code>record</code> phase you'll meet next.)</div>
+  </div>
+
+  <p>The <strong>banking stage</strong> is the cook in our kitchen analogy. It takes verified transactions and does the real work: run each transaction's code, update account balances, and hand the result to be recorded in the block. Because this is where the heavy lifting happens, this is where time gets <em>spent</em>, and therefore where time can be <em>wasted</em>. That is why the lab points its stopwatch here and nowhere else.</p>
+
+  <div class="callout">
+    <span class="label">In the code</span>
+    <p>This lives in Agave (the main Solana validator software) at <code>core/src/banking_stage.rs</code>. Agave is just the name of the production codebase your harness compiles against.</p>
+  </div>
+
+  <!-- ============ 03 ============ -->
+  <h2 id="consumer"><span class="num">03</span>Prerequisite: the consumer and its four phases</h2>
+  <p class="sub">Breaking "build the block" into four smaller timed steps.</p>
+
+  <p>Inside the banking stage, the component that turns transactions into finished, recorded block-entries is called the <strong>consumer</strong>. When it processes a batch of transactions, it goes through <strong>four phases</strong> in order. The lab times each one separately, because knowing <em>which</em> phase is slow tells you a lot.</p>
+
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Phase</th><th>Plain meaning</th><th>Kitchen analogy</th></tr></thead>
+    <tbody>
+      <tr><td><code>load_execute</code></td><td>Load the accounts the transaction touches, then run the transaction's program.</td><td>Fetch ingredients and actually cook.</td></tr>
+      <tr><td><code>freeze_lock</code></td><td>Briefly take the bank's <em>freeze</em> lock so the block's state can't be sealed mid-write. This is <strong>not</strong> the per-account write lock, and it sits near zero unless another thread is freezing the bank.</td><td>Glance up to confirm the kitchen isn't being closed while you plate.</td></tr>
+      <tr><td><code>record</code></td><td>Write the result into the Proof-of-History stream (the official ordering).</td><td>Write the dish onto the official order ticket.</td></tr>
+      <tr><td><code>commit</code></td><td>Make the new balances permanent in the bank's state.</td><td>Serve the dish; it's now real.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout blue">
+    <span class="label">Why split it up</span>
+    <p>"The block took 30 ms" is not actionable. "The block took 30 ms and 28 of them were in <code>load_execute</code>" tells you exactly where to look. The four-phase breakdown is the difference between a vague complaint and a diagnosis.</p>
+  </div>
+
+  <div class="callout warm">
+    <span class="label">A trap to avoid with freeze_lock</span>
+    <p>It is tempting to think <code>freeze_lock</code> is what serializes transactions that touch the same account. It is not. When two transactions fight over the same account, that contention shows up as a <strong>drop in how many transactions commit</strong> (the losers are serialized out and retried), <em>not</em> as <code>freeze_lock</code> time. <code>freeze_lock</code> guards a different thing (sealing the bank) and stays near zero in normal single-batch runs. The harness has a dedicated third test that demonstrates exactly this, so the two locks never get confused.</p>
+  </div>
+
+  <!-- ============ 04 ============ -->
+  <h2 id="votor"><span class="num">04</span>Prerequisite: Votor and the deadline</h2>
+  <p class="sub">Where the time budget actually comes from.</p>
+
+  <p>A block is not "done" when the leader finishes building it. The rest of the network has to <strong>vote</strong> to agree on it. That voting-and-agreement process is <strong>consensus</strong>. Solana's next-generation consensus design is called <strong>Alpenglow</strong>, and the specific part that runs the voting is named <strong>Votor</strong>.</p>
+
+  <p>Votor's design says: from the moment a block starts being shared, agreement must finish within a certain time, or the network moves on. That allowed time is the <strong>budget</strong>. The whitepaper expresses it in symbols, but here is the plain version your harness uses:</p>
+
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Symbol</th><th>Plain meaning</th><th>Value used</th></tr></thead>
+    <tbody>
+      <tr><td><code>&Delta;<sub>block</sub></td><td>The normal block time. How long the leader gets to produce the block.</td><td><strong>400 ms</strong></td></tr>
+      <tr><td><code>&delta;</code></td><td>One network hop. Time for a message to cross from one validator to another.</td><td>~50 ms (assumed)</td></tr>
+      <tr><td><code>3&middot;&delta;</code></td><td>A safety margin for consensus: three network hops' worth of slack.</td><td>~150 ms</td></tr>
+      <tr><td><code>Timeout</code></td><td>The full give-up deadline = <code>3&middot;&delta; + &Delta;<sub>block</sub></code> (safety margin + block time).</td><td>~550 ms</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout warm">
+    <span class="label">The subtle but important point</span>
+    <p>The 550 ms <code>Timeout</code> is a <em>liveness</em> ceiling: it is the "if we pass this, give up and move on" line, not the target. The number the <strong>block-builder</strong> is actually judged against is <code>&Delta;<sub>block</sub> = 400 ms</code>. Your banking stage must finish its work comfortably inside 400 ms. The lab treats 400 ms as the deadline and checks every run against it.</p>
+  </div>
+
+  <div class="callout">
+    <span class="label">A common trap</span>
+    <p>Votor does not run in today's Solana yet (today's network uses an older consensus called TowerBFT). So you cannot "measure Votor." You instead borrow Votor's <strong>budget number</strong> and use it as a deadline to grade the banking stage. The lab measures real banking code against a future consensus's clock.</p>
+  </div>
+
+  <!-- ============ 05 ============ -->
+  <h2 id="jitter"><span class="num">05</span>Prerequisite: what "jitter" means</h2>
+  <p class="sub">The actual thing being studied.</p>
+
+  <p>Run the same code ten times and you will not get the same time ten times. Maybe nine runs take 2 ms and one run takes 32 ms. That <strong>inconsistency</strong> is jitter. Formally: <code>jitter = slowest run &minus; fastest run</code>.</p>
+
+  <div class="analogy">
+    <span class="label">Why jitter, not average, is the enemy</span>
+    <p>If your commute averages 20 minutes but once a week takes 90, the average looks fine while you keep missing meetings. Blockchains live and die by the <em>worst</em> case, not the average, because one late block hurts everyone. So we hunt the spike, not the mean.</p>
+  </div>
+
+  <p>When a spike happens, it is caused by one of three things. The whole skill of this lab is <strong>telling them apart</strong>:</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 760 200" width="760">
+      <g font-size="11">
+        <rect x="20" y="30" width="230" height="140" rx="10" fill="#161a24" stroke="#f7657c" stroke-opacity=".5"/>
+        <text x="135" y="56" text-anchor="middle" fill="#fff" font-weight="600">CPU scheduling</text>
+        <text x="135" y="80" text-anchor="middle" class="svg-dim" font-size="10">Your code was ready to run,</text>
+        <text x="135" y="96" text-anchor="middle" class="svg-dim" font-size="10">but the operating system gave</text>
+        <text x="135" y="112" text-anchor="middle" class="svg-dim" font-size="10">the CPU to something else first.</text>
+        <text x="135" y="146" text-anchor="middle" fill="#f7657c" font-size="10" class="svg-mono">"waiting for a turn"</text>
+
+        <rect x="265" y="30" width="230" height="140" rx="10" fill="#161a24" stroke="#56b6ff" stroke-opacity=".5"/>
+        <text x="380" y="56" text-anchor="middle" fill="#fff" font-weight="600">I/O stall</text>
+        <text x="380" y="80" text-anchor="middle" class="svg-dim" font-size="10">Your code was blocked waiting</text>
+        <text x="380" y="96" text-anchor="middle" class="svg-dim" font-size="10">for disk, network, or another</text>
+        <text x="380" y="112" text-anchor="middle" class="svg-dim" font-size="10">thread to hand over data.</text>
+        <text x="380" y="146" text-anchor="middle" fill="#56b6ff" font-size="10" class="svg-mono">"waiting for data"</text>
+
+        <rect x="510" y="30" width="230" height="140" rx="10" fill="#161a24" stroke="#ffb454" stroke-opacity=".5"/>
+        <text x="625" y="56" text-anchor="middle" fill="#fff" font-weight="600">Allocator pause</text>
+        <text x="625" y="80" text-anchor="middle" class="svg-dim" font-size="10">Your code asked for memory and</text>
+        <text x="625" y="96" text-anchor="middle" class="svg-dim" font-size="10">the memory allocator had to do</text>
+        <text x="625" y="112" text-anchor="middle" class="svg-dim" font-size="10">slow bookkeeping to find it.</text>
+        <text x="625" y="146" text-anchor="middle" fill="#ffb454" font-size="10" class="svg-mono">"waiting for memory"</text>
+      </g>
+    </svg>
+    <div class="caption">The three jitter buckets. A spike is always one of these. The reference harness <em>guessed</em> which; the goal of our version is to <em>measure</em> which.</div>
+  </div>
+
+  <div class="callout blue">
+    <span class="label">The learning goal, stated plainly</span>
+    <p>The assignment's real skill is <strong>diagnosis</strong>: given a spike, prove whether it was CPU scheduling, an I/O stall, or an allocator pause, using evidence instead of a hunch.</p>
+  </div>
+
+  <!-- ============ 06 ============ -->
+  <h2 id="threads"><span class="num">06</span>Prerequisite: tokio vs OS threads (and the blind spot)</h2>
+  <p class="sub">Why the obvious debugging tool quietly fails here.</p>
+
+  <p>Programs do many things at once using <strong>threads</strong> (independent lines of work). There are two flavors here, and the difference is the whole trick:</p>
+
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Kind</th><th>What it is</th><th>Can a tokio debugger see it?</th></tr></thead>
+    <tbody>
+      <tr><td><strong>tokio task</strong></td><td>A lightweight job managed by a Rust library called <code>tokio</code>. There is a popular tool, <code>tokio-console</code>, that shows these live.</td><td>Yes</td></tr>
+      <tr><td><strong>OS thread</strong></td><td>A raw thread managed directly by the operating system, wired together with plain channels.</td><td><strong>No</strong></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Here is the catch. The banking stage looks like a tokio program on the surface, but the <strong>real work, the part that actually spends time, runs on raw OS threads</strong>. So if you reach for <code>tokio-console</code> (the natural first move), it shows you the manager sitting idle and tells you nothing about the busy workers. The tool is <em>blind</em> to exactly the place that matters.</p>
+
+  <div class="callout warm">
+    <span class="label">Why this is a feature of the lab, not a bug</span>
+    <p>Discovering that <code>tokio-console</code> is blind here is itself a core lesson. A big part of the deliverable is <strong>demonstrating the blind spot on purpose</strong>, then reaching for the right tools (operating-system level timers and counters) to see the worker threads.</p>
+  </div>
+
+  <!-- ============ 07 ============ -->
+  <h2 id="harness"><span class="num">07</span>Putting it together: what the harness does</h2>
+  <p class="sub">Now every word in the assignment is defined. Here is the whole thing.</p>
+
+  <p>The lab is built as <strong>two stopwatches plus a contention probe</strong>. The two stopwatches are two useful zoom levels; the third test settles a common confusion:</p>
+
+  <ul class="steps">
+    <li data-n="1"><b>End-to-end stopwatch.</b> Send one transaction into the real banking stage and time how long until it comes out as a finished, committed block-entry. This answers: "did the whole thing fit inside the 400 ms budget?"</li>
+    <li data-n="2"><b>Per-phase stopwatch.</b> Call the consumer directly and read the built-in timers for the four phases (<code>load_execute</code>, <code>freeze_lock</code>, <code>record</code>, <code>commit</code>). This answers: "<em>when</em> a run is slow, which phase ate the time?"</li>
+    <li data-n="3"><b>Account-lock contention probe.</b> Submit a batch of transactions that all touch the same account and watch how many actually commit. This answers: "what does real contention look like?" and proves it shows up as a committed-count drop, <em>not</em> as <code>freeze_lock</code> time.</li>
+  </ul>
+
+  <div class="diagram">
+    <svg viewBox="0 0 760 240" width="760">
+      <defs><marker id="a2" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#14f195"/></marker></defs>
+      <g font-size="11">
+        <rect x="20" y="20" width="720" height="90" rx="10" fill="#11141c" stroke="#222837"/>
+        <text x="36" y="40" font-size="10" class="svg-mono" fill="#14f195">STOPWATCH 1 -- end to end</text>
+        <rect x="40" y="52" width="90" height="40" rx="5" fill="#0d1018" stroke="#56b6ff" stroke-opacity=".4"/><text x="85" y="76" text-anchor="middle" fill="#fff">send tx</text>
+        <line x1="130" y1="72" x2="160" y2="72" stroke="#14f195" marker-end="url(#a2)"/>
+        <rect x="160" y="52" width="170" height="40" rx="5" fill="#1c1530" stroke="#9945ff"/><text x="245" y="76" text-anchor="middle" fill="#fff">real banking stage</text>
+        <line x1="330" y1="72" x2="360" y2="72" stroke="#14f195" marker-end="url(#a2)"/>
+        <rect x="360" y="52" width="130" height="40" rx="5" fill="#0d1018" stroke="#14f195" stroke-opacity=".5"/><text x="425" y="76" text-anchor="middle" fill="#fff">committed entry</text>
+        <text x="600" y="68" font-size="11" class="svg-mono" fill="#ffb454">measured: total ms</text>
+        <text x="600" y="84" font-size="10" class="svg-dim">vs 400 ms budget</text>
+
+        <rect x="20" y="128" width="720" height="92" rx="10" fill="#11141c" stroke="#222837"/>
+        <text x="36" y="148" font-size="10" class="svg-mono" fill="#14f195">STOPWATCH 2 -- per phase</text>
+        <rect x="40"  y="160" width="150" height="42" rx="5" fill="#0d1018" stroke="#9945ff" stroke-opacity=".4"/><text x="115" y="180" text-anchor="middle" fill="#fff" font-size="10">load_execute</text><text x="115" y="194" text-anchor="middle" class="svg-dim" font-size="9">run the tx</text>
+        <rect x="200" y="160" width="120" height="42" rx="5" fill="#0d1018" stroke="#9945ff" stroke-opacity=".4"/><text x="260" y="180" text-anchor="middle" fill="#fff" font-size="10">freeze_lock</text><text x="260" y="194" text-anchor="middle" class="svg-dim" font-size="9">bank-freeze guard</text>
+        <rect x="330" y="160" width="110" height="42" rx="5" fill="#0d1018" stroke="#9945ff" stroke-opacity=".4"/><text x="385" y="180" text-anchor="middle" fill="#fff" font-size="10">record</text><text x="385" y="194" text-anchor="middle" class="svg-dim" font-size="9">into PoH</text>
+        <rect x="450" y="160" width="110" height="42" rx="5" fill="#0d1018" stroke="#9945ff" stroke-opacity=".4"/><text x="505" y="180" text-anchor="middle" fill="#fff" font-size="10">commit</text><text x="505" y="194" text-anchor="middle" class="svg-dim" font-size="9">make permanent</text>
+        <text x="600" y="178" font-size="11" class="svg-mono" fill="#ffb454">measured: each in &micro;s</text>
+        <text x="600" y="194" font-size="10" class="svg-dim">find the slow phase</text>
+      </g>
+    </svg>
+    <div class="caption">Two zoom levels. Stopwatch 1 answers "did we fit the budget?" Stopwatch 2 answers "where did the time go?"</div>
+  </div>
+
+  <p>You run both many times, throw away nothing, and print a small report: minimum, average, maximum, and the jitter (max minus min) for each measurement, plus a PASS/OVER verdict against the 400 ms budget.</p>
+
+  <!-- ============ 08 ============ -->
+  <h2 id="finding"><span class="num">08</span>What the numbers actually say</h2>
+  <p class="sub">The headline result, in one breath.</p>
+
+  <p>Across runs, almost everything is fast: steady-state banking is roughly 200 microseconds end to end. But the <strong>very first run</strong> is slow: about 30 milliseconds, on the order of 100x slower. After that, everything settles down. This first-run spike is a classic <strong>cold start</strong>: the very first time through, the program pays one-time costs that later runs no longer pay.</p>
+
+  <p>The interesting part is <em>which</em> one-time cost. The obvious guess is "the code is just doing more work the first time": running transactions, writing memory. The harness <strong>measures</strong> instead of guessing, and the obvious guess turns out to be wrong:</p>
+
+  <ul class="steps">
+    <li data-n="1"><b>Not the CPU.</b> During the ~30 ms cold window, all the banking worker threads <em>combined</em> use under 1 ms of CPU. They are barely working.</li>
+    <li data-n="2"><b>Not the allocator.</b> A timing allocator shows about the same microseconds in malloc/free on the cold run as on a warm one.</li>
+    <li data-n="3"><b>Not scheduling, not disk.</b> Run-queue wait is ~0 and there are zero major page faults.</li>
+    <li data-n="4"><b>What it actually is.</b> The worker threads are asleep, parked in a kernel wait (<code>futex_wait_queue</code>), and the spike is the time to <em>wake them up</em> and deliver the first message, plus a burst of first-touch page faults (~2200 vs ~170 steady) as fresh memory is paged in for the very first time.</li>
+  </ul>
+
+  <div class="callout">
+    <span class="label">The honest takeaway</span>
+    <p>Steady-state banking is comfortably inside the 400 ms budget, roughly 1000x of headroom. The jitter is almost entirely the cold-start spike, and the spike is <strong>wakeup and first-touch paging, not computation</strong>. That distinction is the entire payoff of measuring instead of guessing: the slow first run is the operating system waking sleeping threads and paging in memory, not the banking code doing heavy work.</p>
+  </div>
+
+  <!-- ============ 09 ============ -->
+  <h2 id="deeper"><span class="num">09</span>Where our version goes further</h2>
+  <p class="sub">The difference between repeating the exercise and owning it.</p>
+
+  <p>A first version of this harness exists (built by a peer) and gets the basic story right. Our version keeps the same approach but tightens the three places it was thin:</p>
+
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Area</th><th>The thin version</th><th>Our version</th></tr></thead>
+    <tbody>
+      <tr><td>Why a spike happened</td><td>Reasoned about it ("probably cold start").</td><td><strong>Measures</strong> it: reads OS scheduler counters and memory-allocator stats per run to prove which bucket it was.</td></tr>
+      <tr><td>The tokio blind spot</td><td>Not addressed.</td><td>Demonstrated on purpose, then worked around with OS-level tools.</td></tr>
+      <tr><td>The deadline used</td><td>Used the loose 550 ms give-up ceiling.</td><td>Judges against the correct <strong>400 ms</strong> block budget, and notes the tighter finalization math separately.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout blue">
+    <span class="label">In one line</span>
+    <p>Same skeleton, but it <strong>measures</strong> the answers the assignment asked for instead of inferring them. That is the whole point of "going deeper."</p>
+  </div>
+
+  <!-- ============ glossary ============ -->
+  <h2 id="glossary"><span class="num">10</span>One-screen glossary</h2>
+  <p class="sub">Every term, one line each. Bookmark this.</p>
+
+  <div class="table-wrap">
+  <table>
+    <tbody>
+      <tr><td><strong>Block</strong></td><td>A batch of agreed-upon transactions.</td></tr>
+      <tr><td><strong>Slot</strong></td><td>The fixed ~400 ms window in which one block is produced.</td></tr>
+      <tr><td><strong>Leader</strong></td><td>The validator chosen to build the block this slot.</td></tr>
+      <tr><td><strong>TPU</strong></td><td>The leader's assembly line: Fetch &rarr; SigVerify &rarr; Banking &rarr; PoH &rarr; Broadcast.</td></tr>
+      <tr><td><strong>Banking stage</strong></td><td>The TPU station that runs transactions and packs the block. What we time.</td></tr>
+      <tr><td><strong>Consumer</strong></td><td>The piece inside banking that turns transactions into recorded entries, in four phases.</td></tr>
+      <tr><td><strong>PoH</strong></td><td>Proof of History: Solana's tamper-proof clock that fixes transaction order.</td></tr>
+      <tr><td><strong>Agave</strong></td><td>The main Solana validator software (the codebase we compile against).</td></tr>
+      <tr><td><strong>Alpenglow / Votor</strong></td><td>Solana's next-gen consensus (Alpenglow) and its voting component (Votor) that set the deadline.</td></tr>
+      <tr><td><strong>&Delta;<sub>block</sub></td><td>The 400 ms block-production budget. The number we grade against.</td></tr>
+      <tr><td><strong>Jitter</strong></td><td>Inconsistency in timing: slowest run minus fastest run.</td></tr>
+      <tr><td><strong>Cold start</strong></td><td>One-time costs paid on the first run only (code loading, cache warming, memory growth).</td></tr>
+      <tr><td><strong>tokio / tokio-console</strong></td><td>A Rust async library and its live debugger; blind to raw OS threads.</td></tr>
+      <tr><td><strong>Harness</strong></td><td>The small measurement program you are building.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <footer>
+    Advanced SVM cohort (Turbin3) &middot; Week 1 weekend lab &middot; plain-language companion to the banking-jitter harness.
+  </footer>
+
+</main>
+
+<aside>
+  <div class="toc-title">On this page</div>
+  <ul class="toc">
+    <li><a href="#what"><span class="num">00</span>What we're building</a></li>
+    <li><a href="#block"><span class="num">01</span>Blocks, slots, leader</a></li>
+    <li><a href="#banking"><span class="num">02</span>The banking stage</a></li>
+    <li><a href="#consumer"><span class="num">03</span>Consumer &amp; 4 phases</a></li>
+    <li><a href="#votor"><span class="num">04</span>Votor &amp; the deadline</a></li>
+    <li><a href="#jitter"><span class="num">05</span>What jitter means</a></li>
+    <li><a href="#threads"><span class="num">06</span>tokio vs OS threads</a></li>
+    <li><a href="#harness"><span class="num">07</span>What the harness does</a></li>
+    <li><a href="#finding"><span class="num">08</span>What numbers say</a></li>
+    <li><a href="#deeper"><span class="num">09</span>Going deeper</a></li>
+    <li><a href="#glossary"><span class="num">10</span>Glossary</a></li>
+  </ul>
+</aside>
+
+</div>
+</body>
+</html>
