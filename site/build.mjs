@@ -42,6 +42,11 @@ const TOPICS = [
     name: 'Kernel Bypass: pshred Ingress',
     tagline: 'Receiving packets at wire speed with XDP and AF_XDP, wired into Solana ingestion.',
   },
+  {
+    dir: 'quic-constellation',
+    name: 'QUIC and Constellation',
+    tagline: 'Transport for proposers, and erasure coding for censorship resistance.',
+  },
 ];
 
 // ---------------------------------------------------------------------------

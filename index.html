@@ -103,8 +103,8 @@ footer a:hover{text-decoration:underline}
       <h1>Field Notes on<br><span class="grad">Solana Internals</span></h1>
       <p class="lede">Long-form, diagram-heavy deep dives into how Solana works below the API line: validator networking, block building, MEV, and the protocol roadmap. Each note is a self-contained page, no build step, written to be read in one sitting.</p>
       <div class="stats">
-        <div class="stat"><span class="v">11</span><span class="k">notes</span></div>
-        <div class="stat"><span class="v">4</span><span class="k">topics</span></div>
+        <div class="stat"><span class="v">12</span><span class="k">notes</span></div>
+        <div class="stat"><span class="v">5</span><span class="k">topics</span></div>
         <div class="stat"><span class="v">open</span><span class="k">source</span></div>
       </div>
     </header>
@@ -232,6 +232,24 @@ footer a:hover{text-decoration:underline}
           <div class="card-eyebrow">KERNEL BYPASS / 01</div>
           <h3 class="card-title">W2: Kernel Bypass -- pshred Ingress at Wire Speed</h3>
           <p class="card-summary">Week 2 of the Turbin3 Advanced SVM cohort decoded: XDP, eBPF, aya-rs, AF_XDP, DPDK, io_uring, QUIC-only TPU ingestion, and the pshred forwarder lab. Every jargon term, every prerequisite, and the why behind kernel-bypass packet processing for Solana validators.</p>
+        </div>
+      </a>
+      </div>
+    </section>
+
+    <section class="topic">
+      <div class="topic-head">
+        <h2>QUIC and Constellation</h2>
+        <span class="count">1 note</span>
+      </div>
+      <p class="topic-tagline">Transport for proposers, and erasure coding for censorship resistance.</p>
+      <div class="grid">
+      <a class="card" href="./quic-constellation/explainer.html">
+        <div class="thumb poster"><span class="poster-num">01</span><span class="poster-title">W3: QUIC and Constellation Erasure Coding</span></div>
+        <div class="card-body">
+          <div class="card-eyebrow">QUIC AND CONSTELLATION / 01</div>
+          <h3 class="card-title">W3: QUIC and Constellation Erasure Coding</h3>
+          <p class="card-summary">Week 3 of the Turbin3 Advanced SVM cohort decoded: QUIC transport (RFC 9000/9001, Agave TPU flow control and stake-weighted QoS), Multiple Concurrent Proposers, Constellation's pshred lifecycle, the 50ms tick budget, and a Reed-Solomon / GF(2^8) / reed-solomon-novelpoly erasure-coding lab. Every concept, prerequisite, and study source, fact-checked against primary sources.</p>
         </div>
       </a>
       </div>

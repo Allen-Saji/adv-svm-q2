@@ -1,0 +1,1011 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>W3: QUIC &amp; Constellation | Transport for Proposers, FEC for Censorship Resistance</title>
+<meta name="description" content="Week 3 of the Turbin3 Advanced SVM cohort decoded: QUIC transport (RFC 9000/9001, Agave TPU flow control and stake-weighted QoS), Multiple Concurrent Proposers, Constellation's pshred lifecycle, the 50ms tick budget, and a Reed-Solomon / GF(2^8) / reed-solomon-novelpoly erasure-coding lab. Every concept, prerequisite, and study source, fact-checked against primary sources.">
+<meta name="note-title" content="W3: QUIC and Constellation Erasure Coding">
+<meta name="note-category" content="QUIC and Constellation">
+<meta name="note-order" content="1">
+<style>
+  :root {
+    --navy:#0a2540; --navy-2:#0d2e4d; --navy-3:#123a5e;
+    --ink:#1c2b3a; --muted:#5b6b7b; --faint:#8a98a6;
+    --paper:#f7f9fb; --card:#ffffff; --line:#e4eaf0;
+    --green:#4f9d3a; --green-d:#3c7a2c;
+    --teal:#0f9d8e;   /* Tue */
+    --orange:#e07b00; /* Wed */
+    --purple:#7b3fb0; /* Thu */
+    --yellow:#f3cf5b;
+    --blue:#1f6feb;
+    --red:#d6453d;
+    --code-bg:#0d2236; --code-ink:#d6e4f0;
+    --radius:14px;
+    --mono:"SFMono-Regular",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  body {
+    margin:0; font-family:var(--sans); color:var(--ink);
+    background:var(--paper); line-height:1.62; font-size:16px;
+    -webkit-font-smoothing:antialiased;
+  }
+  a { color:var(--blue); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  code { font-family:var(--mono); font-size:.86em; background:#eef2f6; padding:.1em .38em; border-radius:5px; color:#1a3a52; }
+  pre { margin:0; }
+  pre code { display:block; background:var(--code-bg); color:var(--code-ink); padding:18px 20px;
+    border-radius:10px; overflow-x:auto; line-height:1.5; font-size:13.5px; }
+
+  /* ---- Layout ---- */
+  .wrap { max-width:1180px; margin:0 auto; padding:0 28px; }
+  .layout { display:grid; grid-template-columns:240px 1fr; gap:48px; align-items:start; }
+  @media (max-width:980px){ .layout{ grid-template-columns:1fr; } .toc{ display:none; } }
+
+  /* ---- Hero ---- */
+  .hero { background:linear-gradient(155deg,var(--navy) 0%,#06192c 100%); color:#eaf1f8; padding:0; overflow:hidden; }
+  .hero-inner { max-width:1180px; margin:0 auto; padding:46px 28px 40px; display:grid; grid-template-columns:auto 1fr; gap:36px; align-items:center; }
+  @media (max-width:760px){ .hero-inner{ grid-template-columns:1fr; gap:22px; } }
+  .w3-badge { width:160px; height:160px; border-radius:20px; background:linear-gradient(160deg,var(--green),var(--green-d));
+    display:flex; align-items:center; justify-content:center; font-weight:800; font-size:74px; color:var(--navy);
+    letter-spacing:-2px; box-shadow:0 18px 40px rgba(0,0,0,.35); }
+  .hero h1 { margin:0 0 6px; font-size:34px; line-height:1.12; letter-spacing:-.5px; color:#fff; }
+  .hero .sub { font-size:17px; color:#9fc3e0; font-style:italic; margin:0 0 16px; }
+  .hero .meta { display:flex; flex-wrap:wrap; gap:10px; margin-top:6px; }
+  .pill { font-size:12.5px; padding:5px 12px; border-radius:999px; background:rgba(255,255,255,.08);
+    border:1px solid rgba(255,255,255,.16); color:#cfe0ee; letter-spacing:.2px; }
+  .pill.instr { background:var(--yellow); color:#5a4a08; border-color:transparent; font-weight:700; }
+
+  /* ---- Schedule strip ---- */
+  .sched { background:var(--navy-2); border-top:1px solid rgba(255,255,255,.08); }
+  .sched-inner { max-width:1180px; margin:0 auto; padding:16px 28px 20px; display:grid;
+    grid-template-columns:repeat(4,1fr); gap:14px; }
+  @media (max-width:760px){ .sched-inner{ grid-template-columns:1fr 1fr; } }
+  .day { background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:12px 14px; }
+  .day .tag { display:inline-block; font-size:11px; font-weight:700; letter-spacing:.8px; text-transform:uppercase;
+    padding:3px 9px; border-radius:6px; color:#fff; margin-bottom:8px; }
+  .t-mon{background:#3a5f8a;} .t-tue{background:var(--teal);} .t-wed{background:var(--orange);} .t-thu{background:var(--purple);}
+  .day .ttl { color:#eaf1f8; font-weight:650; font-size:14.5px; line-height:1.3; }
+  .day .desc { color:#90a6ba; font-size:12.5px; margin-top:4px; }
+
+  /* ---- TOC ---- */
+  .toc { position:sticky; top:20px; font-size:13.5px; padding-top:40px; }
+  .toc h4 { margin:0 0 10px; font-size:11px; letter-spacing:1.2px; text-transform:uppercase; color:var(--faint); }
+  .toc a { display:block; color:var(--muted); padding:4px 0 4px 12px; border-left:2px solid var(--line); }
+  .toc a:hover { color:var(--navy); border-left-color:var(--green); text-decoration:none; }
+  .toc .lvl2 { padding-left:26px; font-size:12.5px; }
+
+  /* ---- Content ---- */
+  .content { padding:40px 0 90px; min-width:0; }
+  section { margin-bottom:14px; scroll-margin-top:18px; }
+  h2 { font-size:25px; letter-spacing:-.3px; margin:46px 0 6px; padding-top:8px; line-height:1.2; }
+  h2 .kicker { display:block; font-size:12px; font-weight:700; letter-spacing:1.4px; text-transform:uppercase; margin-bottom:6px; }
+  h3 { font-size:19px; margin:30px 0 8px; letter-spacing:-.2px; }
+  h4 { font-size:15.5px; margin:20px 0 6px; color:var(--navy-3); }
+  p { margin:10px 0; }
+  ul,ol { margin:10px 0; padding-left:22px; }
+  li { margin:5px 0; }
+  .lead { font-size:17px; color:var(--ink); }
+  hr { border:0; border-top:1px solid var(--line); margin:34px 0; }
+
+  .accent-mon{color:#3a5f8a;} .accent-tue{color:var(--teal);} .accent-wed{color:var(--orange);}
+  .accent-thu{color:var(--purple);} .accent-lab{color:var(--green-d);} .accent-ai{color:var(--purple);}
+
+  /* ---- Callouts ---- */
+  .box { border-radius:12px; padding:14px 18px; margin:18px 0; font-size:14.5px; border:1px solid var(--line); background:var(--card); }
+  .box .bt { font-weight:700; font-size:12px; letter-spacing:.6px; text-transform:uppercase; display:block; margin-bottom:5px; }
+  .box p:first-of-type { margin-top:2px; }
+  .box.info { background:#eef5fc; border-color:#cfe2f6; } .box.info .bt{ color:var(--blue); }
+  .box.verified { background:#edf8ee; border-color:#cfe9d2; } .box.verified .bt{ color:var(--green-d); }
+  .box.caution { background:#fff6ea; border-color:#f6e0bf; } .box.caution .bt{ color:var(--orange); }
+  .box.warn { background:#fdeeed; border-color:#f6cfcc; } .box.warn .bt{ color:var(--red); }
+  .box.key { background:#f3eefb; border-color:#e0d2f3; } .box.key .bt{ color:var(--purple); }
+
+  /* ---- Cards / grid ---- */
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:18px 0; }
+  .grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin:18px 0; }
+  @media (max-width:760px){ .grid2,.grid3{ grid-template-columns:1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
+  .card h4 { margin-top:0; }
+  .card .num { font-size:26px; font-weight:800; color:var(--navy); letter-spacing:-1px; }
+  .card .lbl { font-size:12.5px; color:var(--muted); }
+
+  /* ---- Tables ---- */
+  .tbl-wrap { overflow-x:auto; margin:18px 0; border:1px solid var(--line); border-radius:12px; }
+  table { border-collapse:collapse; width:100%; font-size:13.8px; background:var(--card); }
+  th,td { text-align:left; padding:10px 14px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { background:#f1f5f9; font-size:12px; letter-spacing:.4px; text-transform:uppercase; color:var(--navy-3); font-weight:700; }
+  tr:last-child td { border-bottom:0; }
+  td code { white-space:nowrap; }
+
+  /* ---- Diagram frame ---- */
+  .fig { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:22px 20px 16px; margin:22px 0; }
+  .fig svg { display:block; width:100%; height:auto; }
+  .fig .cap { font-size:12.5px; color:var(--muted); margin-top:12px; text-align:center; }
+  .fig .cap b { color:var(--navy-3); }
+
+  /* ---- Checklist ---- */
+  .check { list-style:none; padding-left:0; }
+  .check li { position:relative; padding-left:30px; margin:9px 0; }
+  .check li::before { content:""; position:absolute; left:0; top:3px; width:18px; height:18px; border-radius:5px;
+    border:2px solid var(--green); background:#edf8ee; }
+  .check li::after { content:"✓"; position:absolute; left:3px; top:1px; color:var(--green-d); font-weight:800; font-size:13px; }
+
+  .tag-inline { font-size:10.5px; font-weight:700; letter-spacing:.4px; padding:2px 7px; border-radius:5px; vertical-align:middle; }
+  .tg-v{ background:#dff0e1; color:var(--green-d);} .tg-l{ background:#e3eefb; color:var(--blue);} .tg-s{ background:#fbeede; color:var(--orange);}
+
+  .footnote { font-size:13px; color:var(--muted); }
+  .srcgrid { display:grid; grid-template-columns:1fr 1fr; gap:8px 24px; }
+  @media (max-width:760px){ .srcgrid{ grid-template-columns:1fr; } }
+  .srcgrid li { font-size:13.5px; }
+  .badge-src { font-size:10px; font-weight:700; padding:1px 6px; border-radius:4px; margin-left:5px; }
+  .b-pri{ background:#dff0e1; color:var(--green-d);} .b-sec{ background:#eef2f6; color:var(--muted);}
+  .small { font-size:13px; color:var(--muted); }
+  .kbd { font-family:var(--mono); font-size:12px; background:#eef2f6; border:1px solid var(--line); border-bottom-width:2px; padding:1px 6px; border-radius:5px; }
+</style>
+</head>
+<body>
+
+<!-- ============ HERO ============ -->
+<header class="hero">
+  <div class="hero-inner">
+    <div class="w3-badge">W3</div>
+    <div>
+      <h1>QUIC &amp; Constellation Erasure Coding</h1>
+      <p class="sub">Transport for proposers, and forward error correction for censorship resistance.</p>
+      <div class="meta">
+        <span class="pill instr">Turbin3 Q2 2026</span>
+        <span class="pill">Advanced SVM Protocol Engineer cohort</span>
+        <span class="pill">Guest: Max Resnick (Anza)</span>
+        <span class="pill">Self-study guide &middot; fact-checked 2026-06-11</span>
+      </div>
+    </div>
+  </div>
+  <div class="sched">
+    <div class="sched-inner">
+      <div class="day"><span class="tag t-mon">Mon &middot; async</span><div class="ttl">QUIC self-study</div><div class="desc">RFC 9000 &sect;4 &amp; &sect;17, RFC 9001, Quinn + s2n-quic</div></div>
+      <div class="day"><span class="tag t-tue">Tue &middot; live</span><div class="ttl">MCPs</div><div class="desc">Multiple Concurrent Proposers - the design space</div></div>
+      <div class="day"><span class="tag t-wed">Wed &middot; live</span><div class="ttl">Constellation as Alpenglow preprocessor</div><div class="desc">pshred lifecycle, latency budget per round</div></div>
+      <div class="day"><span class="tag t-thu">Thu &middot; live</span><div class="ttl">Guest lecture</div><div class="desc">Max Resnick (Anza) - MCP &amp; Constellation author</div></div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+<div class="layout">
+
+  <!-- ============ TOC ============ -->
+  <nav class="toc">
+    <h4>On this page</h4>
+    <a href="#picture">The big picture</a>
+    <a href="#prereq">Prerequisites</a>
+    <a href="#mon">Mon &middot; QUIC transport</a>
+    <a href="#flowctl" class="lvl2">Flow control (&sect;4)</a>
+    <a href="#packets" class="lvl2">Packet formats (&sect;17)</a>
+    <a href="#tls" class="lvl2">TLS (RFC 9001)</a>
+    <a href="#libs" class="lvl2">Quinn vs s2n-quic</a>
+    <a href="#tpu" class="lvl2">Agave TPU enforcement</a>
+    <a href="#tue">Tue &middot; MCPs</a>
+    <a href="#wed">Wed &middot; Constellation</a>
+    <a href="#pshred" class="lvl2">pshred lifecycle</a>
+    <a href="#tickbudget" class="lvl2">50ms tick budget</a>
+    <a href="#censor" class="lvl2">Censorship resistance</a>
+    <a href="#thu">Thu &middot; Max Resnick</a>
+    <a href="#lab">Weekly lab</a>
+    <a href="#erasure" class="lvl2">Erasure coding</a>
+    <a href="#gf" class="lvl2">GF(2^8) arithmetic</a>
+    <a href="#rs" class="lvl2">Reed-Solomon</a>
+    <a href="#novelpoly" class="lvl2">novelpoly</a>
+    <a href="#ai">AI integration</a>
+    <a href="#outcomes">Skill outcomes</a>
+    <a href="#reading">Study materials</a>
+    <a href="#caveats">Caveats</a>
+  </nav>
+
+  <!-- ============ CONTENT ============ -->
+  <main class="content">
+
+  <!-- ===== BIG PICTURE ===== -->
+  <section id="picture">
+    <h2><span class="kicker accent-lab">Orientation</span>The big picture: what this week is really about</h2>
+    <p class="lead">Two halves, one thread. The first half is <b>transport</b>: how transactions actually reach a Solana leader over QUIC. The second half is <b>fair block construction</b>: how Anza wants to break the single-leader monopoly using <b>Multiple Concurrent Proposers</b>, with <b>erasure coding</b> as the mechanism that makes proposer data censorship-resistant. The subtitle of the week says it exactly: <i>transport for proposers, FEC for censorship resistance.</i></p>
+
+    <div class="box key">
+      <span class="bt">Read this first - it reframes the whole week</span>
+      <p><b>"MCPs" on Tuesday means Multiple Concurrent Proposers, not Model Context Protocol.</b> The research is unambiguous: <b>Constellation</b> is Anza's named <i>Multiple Concurrent Proposers</i> proposal, co-authored by Thursday's guest <b>Max Resnick</b>. It is <b>not</b> an erasure-coding sub-layer that lives inside Alpenglow. It is a <b>preprocessor</b> that sits in front of Alpenglow. Anza's own division of labor: <i>"Alpenglow provides safety and liveness; Constellation provides order fairness."</i> The <b>50ms tick budget</b> in this week's material is Constellation's cycle, not an Alpenglow figure.</p>
+      <p class="small" style="margin-bottom:0">There is a secondary reading where "MCPs" means Anthropic's Model Context Protocol, since this cohort integrates AI tooling heavily. That interpretation is covered in a short sidebar under Tuesday, but the contextual fit (proposers in the subtitle, Constellation on Wed, Resnick on Thu) points overwhelmingly at Multiple Concurrent Proposers.</p>
+    </div>
+
+    <div class="fig">
+      <svg viewBox="0 0 920 300" role="img" aria-label="Week thesis flow diagram">
+        <defs>
+          <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#5b6b7b"/></marker>
+        </defs>
+        <!-- clients -->
+        <rect x="14" y="100" width="150" height="100" rx="12" fill="#eef5fc" stroke="#cfe2f6"/>
+        <text x="89" y="130" text-anchor="middle" font-size="14" font-weight="700" fill="#0a2540">Clients /</text>
+        <text x="89" y="148" text-anchor="middle" font-size="14" font-weight="700" fill="#0a2540">proposers</text>
+        <text x="89" y="172" text-anchor="middle" font-size="11.5" fill="#5b6b7b">submit txs</text>
+        <!-- QUIC arrow -->
+        <line x1="166" y1="150" x2="232" y2="150" stroke="#5b6b7b" stroke-width="2" marker-end="url(#ar)"/>
+        <text x="199" y="140" text-anchor="middle" font-size="11" font-weight="700" fill="#0f9d8e">QUIC</text>
+        <!-- constellation -->
+        <rect x="236" y="60" width="330" height="180" rx="12" fill="#fff6ea" stroke="#f6e0bf"/>
+        <text x="401" y="86" text-anchor="middle" font-size="14" font-weight="800" fill="#e07b00">CONSTELLATION (MCP)</text>
+        <text x="401" y="104" text-anchor="middle" font-size="11" fill="#9a6a1f">~16 concurrent proposers &middot; preprocessor</text>
+        <rect x="258" y="122" width="130" height="46" rx="9" fill="#fff" stroke="#f6e0bf"/>
+        <text x="323" y="142" text-anchor="middle" font-size="11.5" font-weight="700" fill="#9a6a1f">pslice</text>
+        <text x="323" y="158" text-anchor="middle" font-size="10.5" fill="#9a6a1f">tx batch</text>
+        <line x1="388" y1="145" x2="414" y2="145" stroke="#9a6a1f" stroke-width="1.8" marker-end="url(#ar)"/>
+        <rect x="416" y="122" width="130" height="46" rx="9" fill="#fff" stroke="#f6e0bf"/>
+        <text x="481" y="139" text-anchor="middle" font-size="11.5" font-weight="700" fill="#9a6a1f">256 pshreds</text>
+        <text x="481" y="156" text-anchor="middle" font-size="10.5" fill="#9a6a1f">Reed-Solomon</text>
+        <text x="401" y="196" text-anchor="middle" font-size="10.5" fill="#9a6a1f">256 attesters, any 64 reconstruct</text>
+        <text x="401" y="214" text-anchor="middle" font-size="10.5" fill="#9a6a1f">50ms cycle &middot; order fairness</text>
+        <!-- feeds arrow -->
+        <line x1="566" y1="150" x2="632" y2="150" stroke="#5b6b7b" stroke-width="2" marker-end="url(#ar)"/>
+        <text x="599" y="140" text-anchor="middle" font-size="11" font-weight="700" fill="#7b3fb0">feeds</text>
+        <!-- alpenglow -->
+        <rect x="636" y="60" width="270" height="180" rx="12" fill="#f3eefb" stroke="#e0d2f3"/>
+        <text x="771" y="86" text-anchor="middle" font-size="14" font-weight="800" fill="#7b3fb0">ALPENGLOW</text>
+        <text x="771" y="104" text-anchor="middle" font-size="11" fill="#6a4a9a">safety + liveness</text>
+        <rect x="656" y="122" width="110" height="46" rx="9" fill="#fff" stroke="#e0d2f3"/>
+        <text x="711" y="142" text-anchor="middle" font-size="11.5" font-weight="700" fill="#6a4a9a">Votor</text>
+        <text x="711" y="158" text-anchor="middle" font-size="10" fill="#6a4a9a">80% / 60%</text>
+        <rect x="776" y="122" width="110" height="46" rx="9" fill="#fff" stroke="#e0d2f3"/>
+        <text x="831" y="142" text-anchor="middle" font-size="11.5" font-weight="700" fill="#6a4a9a">Rotor</text>
+        <text x="831" y="158" text-anchor="middle" font-size="10" fill="#6a4a9a">single-hop FEC</text>
+        <text x="771" y="200" text-anchor="middle" font-size="10.5" fill="#6a4a9a">~100-150ms finality</text>
+        <text x="771" y="218" text-anchor="middle" font-size="10.5" fill="#6a4a9a">replaces TowerBFT + PoH</text>
+      </svg>
+      <div class="cap"><b>The week in one diagram.</b> QUIC carries transactions in (Mon). Constellation runs many proposers concurrently and erasure-codes each proposer's batch into 256 pshreds so no small coalition can censor it (Tue/Wed). Alpenglow then finalizes the resulting block (context). Max Resnick co-authored the proposer half (Thu).</div>
+    </div>
+
+    <p>By the end of the week you should be able to trace a transaction from a client socket all the way to a stake-weighted QUIC connection limit, implement Reed-Solomon encode and decode by hand, quantify how much erasure-coding overhead a 50ms budget can absorb, and explain in plain terms why fair block construction uses erasure coding instead of replication.</p>
+  </section>
+
+  <!-- ===== PREREQUISITES ===== -->
+  <section id="prereq">
+    <h2><span class="kicker accent-lab">Before you start</span>Prerequisites</h2>
+    <p>This week assumes a few things. If any of these feel shaky, spend an hour shoring them up first - the live sessions move fast.</p>
+    <div class="grid2">
+      <div class="card">
+        <h4>Networking foundations</h4>
+        <ul style="margin-bottom:0">
+          <li>TCP vs UDP: connection setup, reliability, head-of-line blocking.</li>
+          <li>TLS 1.3 handshake at a high level (RFC 8446): ClientHello, key exchange, Finished.</li>
+          <li>What a middlebox is and why protocol ossification happens.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h4>Solana data plane</h4>
+        <ul style="margin-bottom:0">
+          <li>What the TPU is and that Solana is mempool-less (Gulf Stream style forwarding to the next leader).</li>
+          <li>Turbine, shreds, and that blocks are already erasure-coded today.</li>
+          <li>Leaders, slots (400ms), and the leader schedule.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h4>Consensus context</h4>
+        <ul style="margin-bottom:0">
+          <li>Alpenglow basics: Votor (voting) replaces TowerBFT, Rotor (dissemination) replaces Turbine.</li>
+          <li>What "finality" means and why ~150ms vs ~12.8s matters.</li>
+          <li>MEV and censorship as the motivation for changing block construction.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h4>Math you will use in the lab</h4>
+        <ul style="margin-bottom:0">
+          <li>Modular arithmetic and the idea of a finite field.</li>
+          <li>Polynomials as coefficient vectors; matrix-vector multiply.</li>
+          <li>Bitwise XOR, shifts, and reading a byte as 8 bits.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="box info"><span class="bt">Quick primers</span>
+      <p style="margin-bottom:0">If you are new to Alpenglow, read the Anza announcement and Helius's deep-dive before Wednesday (both linked under <a href="#reading">Study materials</a>). For finite fields, the Wikipedia "Finite field arithmetic" page plus the Backblaze Reed-Solomon post are enough to follow the lab.</p>
+    </div>
+  </section>
+
+  <hr>
+
+  <!-- ===== MONDAY: QUIC ===== -->
+  <section id="mon">
+    <h2><span class="kicker accent-mon">Monday &middot; async self-study</span>QUIC: the transport layer for transactions</h2>
+    <p class="lead">QUIC is a UDP-based, multiplexed, always-encrypted transport. It folds the TLS 1.3 handshake into the transport handshake, gives each logical message its own stream so one lost packet does not stall everything behind it, and identifies connections by a Connection ID rather than the IP/port 4-tuple. Solana adopted it for transaction ingest because the handshake gives the validator a <b>cryptographic identity per client</b>, which is the hook that stake-weighted prioritization hangs on.</p>
+
+    <div class="grid3">
+      <div class="card"><div class="num">RFC 9000</div><div class="lbl">QUIC transport. You read <b>&sect;4 (flow control)</b> and <b>&sect;17 (packet formats)</b>.</div></div>
+      <div class="card"><div class="num">RFC 9001</div><div class="lbl">Using TLS 1.3 to secure QUIC. Encryption levels, header protection, 0-RTT replay.</div></div>
+      <div class="card"><div class="num">Quinn / s2n-quic</div><div class="lbl">The two Rust QUIC stacks. Agave's TPU uses <b>Quinn</b>.</div></div>
+    </div>
+
+    <h3>Why QUIC over TCP+TLS for a validator</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Problem with TCP+TLS</th><th>What QUIC does instead</th></tr></thead>
+        <tbody>
+          <tr><td>Transport-level head-of-line blocking: one lost segment stalls all multiplexed data.</td><td>Independent streams; loss on stream A does not block delivery on stream B. One tx per stream.</td></tr>
+          <tr><td>Sequential TCP then TLS handshakes add round trips.</td><td>Crypto handshake is carried inside the transport handshake (CRYPTO frames). 1-RTT, or 0-RTT on resumption.</td></tr>
+          <tr><td>Headers are plaintext; middleboxes inspect and ossify them.</td><td>Almost the entire wire image is encrypted, including the packet number (header protection).</td></tr>
+          <tr><td>Connection is bound to the IP/port 4-tuple; breaks on network change.</td><td>Connection IDs survive an address change (connection migration).</td></tr>
+          <tr><td>Raw UDP ingest has no identity, so spammers can flood and spoof.</td><td>Mandatory TLS gives a verified client pubkey, enabling per-identity rate limiting and stake weighting.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Flow control -->
+    <h3 id="flowctl">RFC 9000 &sect;4 - Flow control: a credit system</h3>
+    <p>QUIC flow control is a <b>limit-based credit scheme</b>. The receiver advertises the maximum total number of bytes it is willing to accept, and the sender must never exceed it. There are two independent levels, and the binding constraint is whichever you hit first:</p>
+    <ul>
+      <li><b>Stream level</b> - <code>MAX_STREAM_DATA</code> bounds bytes on one stream. Initial value comes from a transport parameter; the receiver raises it later with a <code>MAX_STREAM_DATA</code> frame.</li>
+      <li><b>Connection level</b> - <code>MAX_DATA</code> bounds the sum of bytes across all streams. Raised with a <code>MAX_DATA</code> frame.</li>
+      <li><b>Concurrency</b> (a separate axis, &sect;4.6) - <code>MAX_STREAMS</code> bounds how many streams a peer may open, not how many bytes. This is the lever Agave actually uses to throttle.</li>
+    </ul>
+
+    <div class="fig">
+      <svg viewBox="0 0 900 230" role="img" aria-label="QUIC flow control credit window">
+        <!-- window bar -->
+        <text x="20" y="30" font-size="13" font-weight="700" fill="#0a2540">Connection receive window (MAX_DATA)</text>
+        <rect x="20" y="44" width="600" height="40" rx="6" fill="#eef5fc" stroke="#cfe2f6"/>
+        <rect x="20" y="44" width="360" height="40" rx="6" fill="#9fcdf2"/>
+        <line x1="380" y1="36" x2="380" y2="96" stroke="#1f6feb" stroke-width="2" stroke-dasharray="4 3"/>
+        <text x="200" y="69" text-anchor="middle" font-size="12" font-weight="700" fill="#10497f">bytes sent</text>
+        <text x="500" y="69" text-anchor="middle" font-size="12" fill="#5b6b7b">available credit</text>
+        <text x="620" y="40" font-size="11" fill="#1f6feb">advertised limit</text>
+        <!-- blocked state -->
+        <text x="20" y="135" font-size="13" font-weight="700" fill="#0a2540">Sender exhausts credit</text>
+        <rect x="20" y="149" width="600" height="40" rx="6" fill="#fdeeed" stroke="#f6cfcc"/>
+        <rect x="20" y="149" width="600" height="40" rx="6" fill="#f3b6b1" opacity=".55"/>
+        <text x="320" y="174" text-anchor="middle" font-size="12" font-weight="700" fill="#a4322b">sender BLOCKED - sends DATA_BLOCKED (advisory)</text>
+        <!-- unblock -->
+        <line x1="630" y1="169" x2="688" y2="169" stroke="#5b6b7b" stroke-width="2" marker-end="url(#ar)"/>
+        <rect x="690" y="149" width="190" height="40" rx="6" fill="#edf8ee" stroke="#cfe9d2"/>
+        <text x="785" y="167" text-anchor="middle" font-size="11.5" font-weight="700" fill="#3c7a2c">receiver sends MAX_DATA</text>
+        <text x="785" y="182" text-anchor="middle" font-size="10.5" fill="#3c7a2c">window grows, sender resumes</text>
+      </svg>
+      <div class="cap"><b>The credit model.</b> A sender may only transmit up to the advertised limit. When it runs out it is "blocked" and may send a <code>DATA_BLOCKED</code> / <code>STREAM_DATA_BLOCKED</code> frame as a hint. Crucially, the receiver <b>MUST NOT wait</b> for that hint before raising the limit, or the sender could stall forever.</div>
+    </div>
+
+    <h4>The &sect;4.1 rules that matter (this is the AI "Explain" exercise)</h4>
+    <ul>
+      <li>A receiver advertises a limit; <b>senders MUST NOT exceed</b> either the stream or the connection limit.</li>
+      <li>A receiver <b>MUST close the connection with <code>FLOW_CONTROL_ERROR</code></b> if a sender sends past an advertised limit.</li>
+      <li>Limits are monotonic in effect: advertising a smaller limit is legal but has no effect, and a sender ignores any frame that does not increase a limit.</li>
+      <li>Blocked-state frames (<code>DATA_BLOCKED</code>, <code>STREAM_DATA_BLOCKED</code>, <code>STREAMS_BLOCKED</code>) are SHOULD-level debugging signals only.</li>
+      <li>Throughput is capped by flow control if the window is smaller than the bandwidth-delay product (BDP = bandwidth &times; RTT).</li>
+    </ul>
+
+    <!-- Packet formats -->
+    <h3 id="packets">RFC 9000 &sect;17 - Packet formats</h3>
+    <p>The most significant bit of byte 0 selects the header form: <b>1 = long header</b> (used before 1-RTT keys exist), <b>0 = short header</b> (used once the handshake is up). There is exactly one short-header packet type in QUIC v1: the 1-RTT packet.</p>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Packet</th><th>Header</th><th>Type code</th><th>Role</th><th>Keys</th></tr></thead>
+        <tbody>
+          <tr><td><b>Initial</b></td><td>Long</td><td><code>0x00</code></td><td>First CRYPTO frames (ClientHello), plus a Token field for address validation.</td><td>Derived from client's first DCID (no real confidentiality).</td></tr>
+          <tr><td><b>0-RTT</b></td><td>Long</td><td><code>0x01</code></td><td>Early application data before the handshake completes. Shares the app-data packet number space with 1-RTT.</td><td>0-RTT keys.</td></tr>
+          <tr><td><b>Handshake</b></td><td>Long</td><td><code>0x02</code></td><td>Remaining handshake CRYPTO + ACKs, in its own packet number space.</td><td>Handshake keys.</td></tr>
+          <tr><td><b>Retry</b></td><td>Long</td><td><code>0x03</code></td><td>Stateless address validation. <b>No packet number, cannot be ACKed.</b> Carries a 128-bit integrity tag.</td><td>Fixed published key (tamper-evidence only).</td></tr>
+          <tr><td><b>1-RTT</b></td><td>Short</td><td>-</td><td>All steady-state application data. Has Spin bit and Key Phase bit.</td><td>1-RTT keys (rotate via key update).</td></tr>
+          <tr><td><i>Version Negotiation</i></td><td>Long</td><td>Version=0</td><td>Server reply when the client's version is unsupported. Consumes the whole datagram.</td><td>Unprotected.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="box caution"><span class="bt">Easy thing to get wrong</span><p style="margin-bottom:0">The <b>Retry</b> packet has <b>no packet number field</b> and cannot be acknowledged. A first-pass reading often assumes every long-header packet has a packet number - Retry does not. Anti-amplification (&sect;9.3) is why it exists: before validating the client's address, a server must not send more than <b>3x</b> the bytes it received.</p></div>
+
+    <!-- TLS -->
+    <h3 id="tls">RFC 9001 - TLS 1.3 is not layered on top, it cooperates</h3>
+    <p>In TCP+TLS, TLS records sit <i>inside</i> TCP as a separate layer. In QUIC, TLS <b>hands its record-layer job to QUIC</b>: handshake messages travel directly in QUIC <code>CRYPTO</code> frames, and TLS pushes packet-protection keys down to QUIC as each encryption level becomes available.</p>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Encryption level</th><th>Packet number space</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>Initial</td><td>Initial</td><td>Keys from client DCID via HKDF with a fixed salt. SHA-256 regardless of cipher suite. No confidentiality vs an observer.</td></tr>
+          <tr><td>Handshake</td><td>Handshake</td><td>Full TLS-negotiated protection.</td></tr>
+          <tr><td>0-RTT</td><td>Application data</td><td>Shares the space with 1-RTT. Replay-exposed.</td></tr>
+          <tr><td>1-RTT</td><td>Application data</td><td>Steady state. Key Phase bit selects key generation.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <ul>
+      <li><b>Header protection</b> (&sect;5.4): a separately derived key encrypts the packet-number field and the low bits of byte 0. This is the headline difference from TCP+TLS, where sequence numbers are fully visible to any on-path observer.</li>
+      <li><b>Key derivation</b> uses TLS 1.3 <code>HKDF-Expand-Label</code> with QUIC-specific labels (<code>"quic key"</code>, <code>"quic iv"</code>, <code>"quic hp"</code>) for cryptographic domain separation from TLS itself.</li>
+      <li><b>0-RTT replay</b> (&sect;9.2): early data is replay-exposed exactly as TLS early data is. QUIC's transport state is idempotent, so the risk lives in the application protocol. "Disabling 0-RTT entirely is the most effective defense."</li>
+    </ul>
+
+    <!-- Libs -->
+    <h3 id="libs">Quinn vs s2n-quic - study both design documents</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th></th><th>Quinn</th><th>s2n-quic (AWS)</th></tr></thead>
+        <tbody>
+          <tr><th>Goal</th><td>Ergonomic async Rust QUIC for general use.</td><td>Security-hardened QUIC for AWS-scale infrastructure.</td></tr>
+          <tr><th>Architecture</th><td>Three crates: <code>quinn-proto</code> (sans-I/O deterministic state machine), <code>quinn-udp</code> (socket + ECN), <code>quinn</code> (Tokio async API).</td><td>Layered protocol core + TLS via <code>s2n-tls</code> + crypto + network integration + app API.</td></tr>
+          <tr><th>Verification</th><td>Standard Rust testing and fuzzing.</td><td>libFuzzer + AFL + honggfuzz + Bolero + the <b>Kani</b> model checker; AWS Automated Reasoning collaboration.</td></tr>
+          <tr><th>Model</th><td>Endpoint (one UDP socket) hosts many Connections; streams are async read/write handles.</td><td>Embeddable, AWS-internal usage patterns.</td></tr>
+          <tr><th>In Solana</th><td><b>Yes</b> - Agave's TPU streamer imports <code>quinn</code> directly.</td><td>Not found in the Agave codebase.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small">The sans-I/O split in Quinn (<code>quinn-proto</code> does no I/O, just state transitions) is the key design idea to internalize: it makes the protocol logic deterministic and testable, and embeddable in any event loop. s2n-quic's distinguishing bet is formal verification and aggressive fuzzing rather than API ergonomics.</p>
+
+    <!-- TPU -->
+    <h3 id="tpu">Where Agave's TPU enforces &sect;4.1, and what happens to a misbehaving client</h3>
+    <p>This is the literal answer to the week's "Explain" exercise: <i>paste RFC 9000 &sect;4.1 and ask where Agave's TPU enforces it.</i> First, the pipeline a stream travels through:</p>
+
+    <div class="fig">
+      <svg viewBox="0 0 920 130" role="img" aria-label="Agave TPU pipeline">
+        <defs><marker id="ar2" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#3a5f8a"/></marker></defs>
+        <g font-size="12.5" font-weight="700" text-anchor="middle">
+          <rect x="8"   y="40" width="150" height="56" rx="10" fill="#eef5fc" stroke="#9fcdf2"/>
+          <text x="83" y="64" fill="#0a2540">Fetch (QUIC)</text><text x="83" y="82" font-size="10.5" font-weight="400" fill="#5b6b7b">ingest, classify peer</text>
+          <line x1="158" y1="68" x2="184" y2="68" stroke="#3a5f8a" stroke-width="2" marker-end="url(#ar2)"/>
+          <rect x="186" y="40" width="150" height="56" rx="10" fill="#eef5fc" stroke="#9fcdf2"/>
+          <text x="261" y="64" fill="#0a2540">SigVerify</text><text x="261" y="82" font-size="10.5" font-weight="400" fill="#5b6b7b">dedup, Ed25519 batch</text>
+          <line x1="336" y1="68" x2="362" y2="68" stroke="#3a5f8a" stroke-width="2" marker-end="url(#ar2)"/>
+          <rect x="364" y="40" width="150" height="56" rx="10" fill="#eef5fc" stroke="#9fcdf2"/>
+          <text x="439" y="64" fill="#0a2540">Banking</text><text x="439" y="82" font-size="10.5" font-weight="400" fill="#5b6b7b">schedule, execute</text>
+          <line x1="514" y1="68" x2="540" y2="68" stroke="#3a5f8a" stroke-width="2" marker-end="url(#ar2)"/>
+          <rect x="542" y="40" width="150" height="56" rx="10" fill="#eef5fc" stroke="#9fcdf2"/>
+          <text x="617" y="64" fill="#0a2540">PoH</text><text x="617" y="82" font-size="10.5" font-weight="400" fill="#5b6b7b">hash chain, Entries</text>
+          <line x1="692" y1="68" x2="718" y2="68" stroke="#3a5f8a" stroke-width="2" marker-end="url(#ar2)"/>
+          <rect x="720" y="40" width="190" height="56" rx="10" fill="#eef5fc" stroke="#9fcdf2"/>
+          <text x="815" y="64" fill="#0a2540">Broadcast</text><text x="815" y="82" font-size="10.5" font-weight="400" fill="#5b6b7b">shred + Turbine</text>
+        </g>
+      </svg>
+      <div class="cap"><b>The TPU pipeline.</b> A QUIC stream is accepted in the Fetch stage, where the client's pubkey (from the TLS cert) classifies it as staked or unstaked before any flow-control limits apply.</div>
+    </div>
+
+    <p>Flow control is configured in <code>streamer/src/quic.rs</code> via Quinn's <code>TransportConfig</code>, and enforced at three layers:</p>
+    <pre><code>// streamer/src/quic.rs  (configure_server)
+const CONNECTION_RECEIVE_WINDOW_BYTES: VarInt = VarInt::from_u32(8 * 1024 * 1024); // MAX_DATA = 8 MiB
+
+config.stream_receive_window(stream_receive_window_size.into()); // MAX_STREAM_DATA ~ one tx
+config.receive_window(CONNECTION_RECEIVE_WINDOW_BYTES);          // MAX_DATA (connection level)
+config.max_concurrent_uni_streams(0u32.into());  // set per-connection later, by stake
+config.max_concurrent_bidi_streams(0u32.into()); // TPU is uni-stream only</code></pre>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Layer</th><th>Limit</th><th>If a client violates it</th></tr></thead>
+        <tbody>
+          <tr><td>QUIC protocol (Quinn)</td><td><code>MAX_DATA</code> / <code>MAX_STREAM_DATA</code> per RFC 9000 &sect;4.1</td><td>Quinn closes the connection with <code>FLOW_CONTROL_ERROR</code>; surfaced as <code>connection_setup_error_transport</code>.</td></tr>
+          <tr><td>Agave application</td><td><code>max_stream_data_bytes</code> (one tx per stream)</td><td><code>handle_chunks()</code> rejects the stream and Agave calls <code>connection.close(code 5, "invalid_stream")</code> - the whole connection is torn down.</td></tr>
+          <tr><td>SWQoS stream rate</td><td>EMA stream budget per 100ms window</td><td><b>Not closed.</b> <code>throttle_stream()</code> sleeps the read loop for the rest of the window (backpressure).</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>Stake-weighted QoS, by the numbers</h4>
+    <p>The handshake pubkey is looked up in <code>StakedNodes</code> and the connection lands in a staked or unstaked table. Per-connection stream allowance scales with stake:</p>
+    <div class="grid3">
+      <div class="card"><div class="num">128</div><div class="lbl">Max concurrent uni-streams for an <b>unstaked</b> peer (flat).</div></div>
+      <div class="card"><div class="num">128 - 512</div><div class="lbl">Stream range for a <b>staked</b> peer, scaled by stake fraction, then BDP-scaled by RTT.</div></div>
+      <div class="card"><div class="num">8 / 16</div><div class="lbl">Max QUIC connections per <b>unstaked / staked</b> peer.</div></div>
+    </div>
+    <pre><code>// streamer/src/nonblocking/swqos.rs  (current master, constants drift between releases)
+QUIC_MAX_UNSTAKED_CONCURRENT_STREAMS = 128;
+QUIC_MIN_STAKED_CONCURRENT_STREAMS   = 128;
+QUIC_MAX_STAKED_CONCURRENT_STREAMS   = 512;
+QUIC_TOTAL_STAKED_CONCURRENT_STREAMS = 100_000;
+
+// staked peer allowance:
+streams = clamp( (peer_stake / total_stake) * (100_000 - 128) + 128, 128, 512 );
+streams = streams * clamp(rtt_ms, 50, 350) / 50;   // BDP scaling, up to 7x
+connection.set_max_concurrent_uni_streams(streams); // RFC 9000 MAX_STREAMS</code></pre>
+    <div class="box caution"><span class="bt">Version drift - verify against your Agave tag</span><p style="margin-bottom:0">These constants are from <code>master</code> (around <code>v4.1.0-beta.3</code>, June 2026). The QoS code was being actively refactored in mid-2026 (a <code>QosController</code> trait split into <code>SwQos</code> and a newer <code>SimpleQos</code>, and the old "80/20" percentage split was being reworked). The conceptual "80% capacity reserved for stake-weighted traffic, 20% for unstaked" framing from older blog posts is the right mental model, but do not quote it as a literal current constant without checking the source for the exact version you run.</p></div>
+  </section>
+
+  <hr>
+
+  <!-- ===== TUESDAY: MCPs ===== -->
+  <section id="tue">
+    <h2><span class="kicker accent-tue">Tuesday &middot; live</span>MCPs - Multiple Concurrent Proposers</h2>
+    <p class="lead">Today's topic is the <b>single-leader problem</b> and the design space that tries to fix it. On Solana today, one leader per slot has a monopoly over which transactions get in and in what order. That monopoly is the root of two things the protocol would rather not have: <b>censorship</b> (a leader can simply drop your transaction) and <b>MEV extraction</b> (a leader can reorder, sandwich, and front-run).</p>
+
+    <h3>What "Multiple Concurrent Proposers" means</h3>
+    <p>MCP breaks block construction away from the single leader. Instead of one node deciding content, <b>several proposers build transaction batches concurrently</b>, and the leader's job shrinks to assembling those batches under tight constraints. The leader keeps liveness and ordering of the final block; the proposers collectively own <b>what gets included</b>. The design goal is <b>order fairness</b>: a transaction that enough proposers saw must make it into the block.</p>
+
+    <div class="grid2">
+      <div class="card"><h4>The single-leader failure modes</h4>
+        <ul style="margin-bottom:0">
+          <li><b>Selective censorship</b> - the leader drops specific transactions at zero cost.</li>
+          <li><b>MEV</b> - reorder, insert, sandwich for profit.</li>
+          <li><b>Liveness coupling</b> - one slow or offline leader stalls inclusion for everyone in that slot.</li>
+        </ul>
+      </div>
+      <div class="card"><h4>What MCP changes</h4>
+        <ul style="margin-bottom:0">
+          <li>Many proposers run at once, rotated by stake.</li>
+          <li>Inclusion becomes a <b>protocol rule</b>, not a leader's discretion.</li>
+          <li>Hiding the batch contents until inclusion neutralizes content-based MEV.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="box info"><span class="bt">The foundational paper</span><p style="margin-bottom:0"><b>"Multiple Concurrent Proposers: Why and How"</b> - Garimidi, Neu (a16z Crypto Research) and <b>Max Resnick</b> (Anza), 2025, <a href="https://arxiv.org/abs/2509.23984">arXiv:2509.23984</a>. It is described as the only MCP design in the current literature that formally achieves <b>both selective-censorship resistance and hiding simultaneously</b>. Constellation (Wednesday) is the concrete Solana instantiation, and Resnick (Thursday) is a co-author. Reading the abstract and introduction before Tuesday will pay off.</p></div>
+
+    <div class="box key"><span class="bt">Sidebar: the other reading of "MCPs"</span>
+      <p>Because this cohort integrates AI tooling heavily, "MCPs" could conceivably mean Anthropic's <b>Model Context Protocol</b> - an open standard (Nov 2024) that lets AI apps connect to external tools, data, and prompts through a JSON-RPC client-server interface ("USB-C for AI"). Its three server primitives are <b>Tools</b> (callable functions), <b>Resources</b> (read-only context by URI), and <b>Prompts</b> (reusable templates).</p>
+      <p style="margin-bottom:0">If that is what Tuesday covers, the systems-engineering payoff is building a small MCP server that grounds an AI assistant in real artifacts: a server exposing your Agave checkout for cited code lookups, a <code>tshark</code>/pcap analysis tool for QUIC debugging, or an RFC-section resource so the model quotes normative text instead of paraphrasing. <b>Given the week's framing, Multiple Concurrent Proposers is far more likely the intended topic.</b></p>
+    </div>
+  </section>
+
+  <hr>
+
+  <!-- ===== WEDNESDAY: CONSTELLATION ===== -->
+  <section id="wed">
+    <h2><span class="kicker accent-wed">Wednesday &middot; live</span>Constellation as an Alpenglow preprocessor</h2>
+    <p class="lead">Constellation is Anza's concrete Multiple Concurrent Proposers proposal (authors: Brennan Watt and Max Resnick). It does not replace Alpenglow - it runs <b>in front of</b> it. The division of labor is the single most important sentence this week: <b>Alpenglow provides safety and liveness; Constellation provides order fairness.</b> The batches Constellation produces become the payload of Alpenglow's blocks.</p>
+
+    <h3>Alpenglow recap (the thing Constellation feeds)</h3>
+    <div class="grid2">
+      <div class="card"><h4>Votor - voting / finalization</h4>
+        <ul style="margin-bottom:0">
+          <li><b>Fast path</b>: 1 round, &ge;80% stake, target ~100ms.</li>
+          <li><b>Slow path</b>: 2 rounds, &ge;60% stake each, target ~150ms.</li>
+          <li>Both run concurrently; block finalizes when the faster path completes.</li>
+          <li>Uses BLS signature aggregation; replaces TowerBFT + PoH-based voting.</li>
+        </ul>
+      </div>
+      <div class="card"><h4>Rotor - dissemination</h4>
+        <ul style="margin-bottom:0">
+          <li><b>Single-hop</b> relay layer replacing Turbine's multi-layer tree.</li>
+          <li>Leader erasure-codes the block (Reed-Solomon) into shreds; relays each broadcast their portion to all.</li>
+          <li>Relays sampled by stake; bandwidth used proportional to stake.</li>
+          <li>Only a subset of shreds is needed to reconstruct.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="box verified"><span class="bt">Resilience &amp; latency</span><p style="margin-bottom:0">Alpenglow targets <b>~100-150ms finality</b> (down ~100x from TowerBFT's 12.8s) and a <b>20+20</b> fault model: up to 20% Byzantine stake plus an additional 20% crashed/offline stake, so 40% non-responsive tolerance while staying under 33% Byzantine.</p></div>
+
+    <h3 id="pshred">The pshred lifecycle, proposer to leader</h3>
+    <p>This is Wednesday's headline mechanic. Each cycle, a proposer turns its accepted transactions into a <b>pslice</b>, erasure-codes it into <b>256 pshreds</b> (the "p" is silent, to distinguish from Alpenglow's slices), and sends one pshred to each of <b>256 attesters</b>. Every pshred carries a hash commitment to the full ordered transaction list, so the leader cannot reorder or substitute after attesters have signed.</p>
+
+    <div class="fig">
+      <svg viewBox="0 0 920 320" role="img" aria-label="Constellation pshred lifecycle">
+        <defs><marker id="ar3" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#9a6a1f"/></marker></defs>
+        <!-- step 1 -->
+        <rect x="14" y="30" width="150" height="64" rx="11" fill="#fff6ea" stroke="#f6e0bf"/>
+        <text x="89" y="55" text-anchor="middle" font-size="12.5" font-weight="700" fill="#e07b00">1. Cycle</text>
+        <text x="89" y="73" text-anchor="middle" font-size="10.5" fill="#9a6a1f">50ms window from</text>
+        <text x="89" y="86" text-anchor="middle" font-size="10.5" fill="#9a6a1f">UTC / 50,000,000</text>
+        <line x1="164" y1="62" x2="190" y2="62" stroke="#9a6a1f" stroke-width="2" marker-end="url(#ar3)"/>
+        <!-- step 2 -->
+        <rect x="192" y="30" width="150" height="64" rx="11" fill="#fff6ea" stroke="#f6e0bf"/>
+        <text x="267" y="55" text-anchor="middle" font-size="12.5" font-weight="700" fill="#e07b00">2. pslice</text>
+        <text x="267" y="73" text-anchor="middle" font-size="10.5" fill="#9a6a1f">proposer assembles</text>
+        <text x="267" y="86" text-anchor="middle" font-size="10.5" fill="#9a6a1f">accepted txs</text>
+        <line x1="342" y1="62" x2="368" y2="62" stroke="#9a6a1f" stroke-width="2" marker-end="url(#ar3)"/>
+        <!-- step 3 -->
+        <rect x="370" y="30" width="170" height="64" rx="11" fill="#fff6ea" stroke="#f6e0bf"/>
+        <text x="455" y="55" text-anchor="middle" font-size="12.5" font-weight="700" fill="#e07b00">3. Encode</text>
+        <text x="455" y="73" text-anchor="middle" font-size="10.5" fill="#9a6a1f">Reed-Solomon into</text>
+        <text x="455" y="86" text-anchor="middle" font-size="10.5" fill="#9a6a1f">256 pshreds + hash</text>
+        <line x1="540" y1="62" x2="566" y2="62" stroke="#9a6a1f" stroke-width="2" marker-end="url(#ar3)"/>
+        <!-- step 4 -->
+        <rect x="568" y="30" width="170" height="64" rx="11" fill="#fff6ea" stroke="#f6e0bf"/>
+        <text x="653" y="55" text-anchor="middle" font-size="12.5" font-weight="700" fill="#e07b00">4. Distribute</text>
+        <text x="653" y="73" text-anchor="middle" font-size="10.5" fill="#9a6a1f">1 pshred to each of</text>
+        <text x="653" y="86" text-anchor="middle" font-size="10.5" fill="#9a6a1f">256 attesters</text>
+        <!-- attesters row -->
+        <g fill="#f4c98a" stroke="#e07b00" stroke-width="1">
+          <rect x="120" y="140" width="20" height="26" rx="3"/><rect x="150" y="140" width="20" height="26" rx="3"/>
+          <rect x="180" y="140" width="20" height="26" rx="3"/><rect x="210" y="140" width="20" height="26" rx="3"/>
+          <rect x="240" y="140" width="20" height="26" rx="3"/><rect x="270" y="140" width="20" height="26" rx="3"/>
+          <rect x="300" y="140" width="20" height="26" rx="3"/><rect x="330" y="140" width="20" height="26" rx="3"/>
+          <rect x="360" y="140" width="20" height="26" rx="3"/><rect x="390" y="140" width="20" height="26" rx="3"/>
+          <rect x="420" y="140" width="20" height="26" rx="3"/><rect x="450" y="140" width="20" height="26" rx="3"/>
+          <rect x="480" y="140" width="20" height="26" rx="3"/><rect x="510" y="140" width="20" height="26" rx="3"/>
+          <rect x="540" y="140" width="20" height="26" rx="3"/><rect x="570" y="140" width="20" height="26" rx="3"/>
+        </g>
+        <line x1="653" y1="96" x2="380" y2="136" stroke="#9a6a1f" stroke-width="1.4" stroke-dasharray="3 3" marker-end="url(#ar3)"/>
+        <text x="345" y="186" text-anchor="middle" font-size="10.5" fill="#9a6a1f">256 attesters hold one pshred each &middot; any 64 reconstruct the pslice</text>
+        <!-- step 5 -->
+        <rect x="118" y="210" width="200" height="64" rx="11" fill="#edf3fb" stroke="#cfe2f6"/>
+        <text x="218" y="235" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1f6feb">5. Attestation</text>
+        <text x="218" y="253" text-anchor="middle" font-size="10.5" fill="#3a5f8a">at cycle-end each attester signs</text>
+        <text x="218" y="266" text-anchor="middle" font-size="10.5" fill="#3a5f8a">the list of pslice commitments seen</text>
+        <line x1="318" y1="242" x2="360" y2="242" stroke="#5b6b7b" stroke-width="2" marker-end="url(#ar)"/>
+        <!-- step 6 -->
+        <rect x="362" y="210" width="240" height="64" rx="11" fill="#f3eefb" stroke="#e0d2f3"/>
+        <text x="482" y="235" text-anchor="middle" font-size="12.5" font-weight="700" fill="#7b3fb0">6. Leader (same as Alpenglow)</text>
+        <text x="482" y="253" text-anchor="middle" font-size="10.5" fill="#6a4a9a">assembles block, tightly constrained</text>
+        <text x="482" y="266" text-anchor="middle" font-size="10.5" fill="#6a4a9a">by the attestation record</text>
+        <line x1="602" y1="242" x2="644" y2="242" stroke="#5b6b7b" stroke-width="2" marker-end="url(#ar)"/>
+        <rect x="646" y="210" width="170" height="64" rx="11" fill="#f3eefb" stroke="#e0d2f3"/>
+        <text x="731" y="240" text-anchor="middle" font-size="12.5" font-weight="700" fill="#7b3fb0">Alpenglow</text>
+        <text x="731" y="258" text-anchor="middle" font-size="10.5" fill="#6a4a9a">Votor notarizes the block</text>
+      </svg>
+      <div class="cap"><b>Proposer to leader.</b> The hash commitment in each pshred is the anti-tamper hook; the attestation record is the anti-censorship hook. Steps 5-6 hand off into Alpenglow.</div>
+    </div>
+
+    <h4>The three thresholds - do not confuse them</h4>
+    <div class="grid3">
+      <div class="card"><div class="num">64 / 256</div><div class="lbl"><b>Recovery threshold (25%)</b>. Any 64 of 256 pshreds reconstruct the pslice. This is the "Constellation whitepaper's recovery threshold" the lab validates against.</div></div>
+      <div class="card"><div class="num">40%</div><div class="lbl"><b>Inclusion threshold</b>. A pslice attested by &ge;40% of attesters <b>must</b> be in the block, or the block is invalid.</div></div>
+      <div class="card"><div class="num">60%</div><div class="lbl"><b>Validity threshold</b>. Block-level validity; below it, the slot is skipped.</div></div>
+    </div>
+
+    <div class="box info"><span class="bt">"Constellation-parameterised encoder" = HECC</span><p>Constellation's north star is a <b>Hiding Erasure-Correcting Code (HECC)</b>: parameterized so any <b>T</b> shreds reveal <b>no information</b> about the batch, while <b>K + T</b> shreds allow full reconstruction - information-theoretic hiding on top of erasure recovery, which is what kills content-based MEV. <b>Important nuance:</b> the shipped v1 uses <b>plain Reed-Solomon</b> (like Turbine) with only partial hiding; full HECC is deferred. So "Constellation-parameterised encoder" means an erasure encoder tuned to HECC's (T, K) thresholds, which v1 approximates. The formal treatment is in arXiv:2509.23984.</p></div>
+
+    <!-- Tick budget -->
+    <h3 id="tickbudget">The 50ms tick budget - latency per round</h3>
+    <p>Constellation's fundamental time unit is a <b>50ms cycle</b>, billed by Anza as the fastest protocol-enforced economic tick of any production blockchain. Everything a proposer does - assemble the pslice, Reed-Solomon encode it into 256 pshreds, and distribute one to each attester - <b>must fit inside that 50ms</b>. This is exactly why FEC overhead has to be quantified against the budget: encoding plus dissemination plus attestation cannot overrun the window.</p>
+    <div class="fig">
+      <svg viewBox="0 0 900 110" role="img" aria-label="50ms tick budget timeline">
+        <rect x="20" y="40" width="840" height="34" rx="6" fill="#f1f5f9" stroke="#e4eaf0"/>
+        <rect x="20"  y="40" width="230" height="34" fill="#f4c98a"/>
+        <rect x="250" y="40" width="300" height="34" fill="#f6b26b"/>
+        <rect x="550" y="40" width="200" height="34" fill="#f49e4c"/>
+        <rect x="750" y="40" width="110" height="34" fill="#dff0e1"/>
+        <g font-size="11.5" font-weight="700" text-anchor="middle" fill="#7a4a10">
+          <text x="135" y="62">assemble pslice</text>
+          <text x="400" y="62">RS encode -&gt; 256 pshreds</text>
+          <text x="650" y="62">distribute</text>
+        </g>
+        <text x="805" y="62" text-anchor="middle" font-size="11.5" font-weight="700" fill="#3c7a2c">attest</text>
+        <text x="20" y="92" font-size="11" fill="#5b6b7b">t = 0</text>
+        <text x="860" y="92" text-anchor="end" font-size="11" fill="#5b6b7b">t = 50ms</text>
+      </svg>
+      <div class="cap"><b>Illustrative budget split</b> (proportions are schematic, not Anza-published). The constraint is real: the entire encode-and-disseminate path must complete inside one 50ms cycle. For reference, Alpenglow's Rotor pushes ~1,500 shreds in ~18ms at 1 Gb/s and reaches 80% stake in ~2ms, which is why these budgets are feasible.</div>
+    </div>
+    <div class="box caution"><span class="bt">Don't over-claim a per-round number</span><p style="margin-bottom:0">Neither whitepaper publishes a single labeled "latency budget per voting round" figure. The defensible facts are: Constellation's <b>50ms cycle</b>, Alpenglow's <b>~400ms slot</b> (PoH removed, local clocks instead) trending toward a planned 200ms, and finality at roughly <b>2x</b> the raw-network lower bound. Treat any exact per-round millisecond budget beyond these as undocumented.</p></div>
+
+    <!-- Censorship -->
+    <h3 id="censor">Why erasure coding, not replication, for censorship resistance</h3>
+    <p>This is the "explain why Constellation uses erasure coding rather than replication" skill outcome. The argument has two legs:</p>
+    <ol>
+      <li><b>An adversary cannot choose which shreds matter.</b> Because <i>any</i> 64 of 256 pshreds reconstruct the pslice, to suppress a proposer's data a censor must stop the data from reaching enough honest attesters - it must control roughly <b>75%</b> (more than 192 of 256). With replication, a censor only needs to suppress the specific nodes holding the copies, which is a much smaller and more targetable set.</li>
+      <li><b>Inclusion is protocol-enforced.</b> A pslice attested by &ge;40% of attesters must be included, and the per-pshred hash commitment stops the leader from quietly reordering or dropping it. Censorship stops being a cheap, silent, single-actor choice and becomes an expensive, broad, detectable coalition act.</li>
+    </ol>
+    <div class="fig">
+      <svg viewBox="0 0 900 110" role="img" aria-label="Censorship threshold visualization">
+        <text x="20" y="28" font-size="12.5" font-weight="700" fill="#0a2540">To censor one pslice, an adversary must suppress &gt; 192 of 256 pshreds (~75%)</text>
+        <g>
+          <rect x="20" y="44" width="660" height="30" rx="5" fill="#dff0e1" stroke="#cfe9d2"/>
+          <rect x="20" y="44" width="165" height="30" rx="5" fill="#f3b6b1"/>
+          <line x1="660" y1="38" x2="660" y2="80" stroke="#3c7a2c" stroke-width="2" stroke-dasharray="4 3"/>
+          <text x="100" y="64" text-anchor="middle" font-size="11" font-weight="700" fill="#a4322b">64 = recover</text>
+          <text x="420" y="64" text-anchor="middle" font-size="11" fill="#3c7a2c">honest attesters still holding enough shreds -&gt; data survives</text>
+          <text x="700" y="48" font-size="10.5" fill="#3c7a2c">192</text>
+        </g>
+      </svg>
+      <div class="cap">The 64-of-256 recovery threshold flips the economics of censorship: blocking 64 honest deliveries is cheap, blocking 193 is not.</div>
+    </div>
+
+    <div class="box warn"><span class="bt">Honesty flag: Constellation is contested and unratified</span>
+      <p>Constellation is a live proposal, not finalized protocol. A public critique ("Constellation Is Not Ready For the SIMD", Anagram) argues that a validator can hold both proposer and leader roles in the same cycle (a sandwich-overlap), that ~16 proposer slots are exposed to concentrated validator-as-a-service operators, and that a 40%-attester coalition could selectively withhold attestations without any single overtly malicious act. It also estimates Constellation <b>adds ~75ms</b> of shred-observation latency versus today.</p>
+      <p style="margin-bottom:0">Separately, <b>Rotor's exact Reed-Solomon parameters are deferred to a future SIMD</b> - SIMD-0326 (Alpenglow) explicitly keeps Turbine initially and introduces Rotor later. So treat Rotor's k/n and Constellation's specifics as proposal-stage, not ratified.</p>
+    </div>
+  </section>
+
+  <hr>
+
+  <!-- ===== THURSDAY ===== -->
+  <section id="thu">
+    <h2><span class="kicker accent-thu">Thursday &middot; guest lecture</span>Max Resnick (Anza)</h2>
+    <p class="lead">Lead Economist at Anza, formerly an Ethereum consensus and economics researcher who moved to Solana. He is the connective tissue of this entire week: co-author of the foundational MCP paper, co-author of Constellation, and a public voice on Alpenglow's fee-market and consensus economics.</p>
+    <div class="grid2">
+      <div class="card"><h4>What he built</h4>
+        <ul style="margin-bottom:0">
+          <li>Co-author, <b>"Multiple Concurrent Proposers: Why and How"</b> (arXiv:2509.23984).</li>
+          <li>Co-author of <b>Constellation</b> (with Brennan Watt).</li>
+          <li>Early focus at Anza on fee markets and consensus; proposed the multi-leader "moonshot" to end the single-leader model.</li>
+        </ul>
+      </div>
+      <div class="card"><h4>Highest-leverage questions to ask</h4>
+        <ul style="margin-bottom:0">
+          <li>HECC vs the shipped partial-hiding tradeoff - what does v1 give up, and when does full HECC land?</li>
+          <li>The proposer/leader overlap concern from the Anagram critique - is it real, and how is it mitigated?</li>
+          <li>Does the 50ms cycle survive the estimated ~75ms latency hit on mainnet hardware?</li>
+          <li>How do Constellation's inclusion guarantees interact with Alpenglow's 20+20 fault model?</li>
+        </ul>
+      </div>
+    </div>
+    <div class="box info"><span class="bt">Prep move</span><p style="margin-bottom:0">Skim arXiv:2509.23984 and the Anza Constellation post before Thursday so your questions land on the open problems (hiding, collusion, latency) rather than the basics. A guest co-author is the rare chance to ask "why this design and not the obvious alternative."</p></div>
+  </section>
+
+  <hr>
+
+  <!-- ===== LAB ===== -->
+  <section id="lab">
+    <h2><span class="kicker accent-lab">Weekly lab</span>Build a Constellation-parameterised encoder</h2>
+    <div class="box key"><span class="bt">The task, restated</span><p style="margin-bottom:0">Implement a Constellation-parameterised Reed-Solomon encoder. Run it against the Constellation recovery threshold (any <b>64 of 256</b> reconstruct). Then compare <b>byte-for-byte output</b> against the <code>reed-solomon-novelpoly</code> crate to validate correctness.</p></div>
+
+    <!-- Erasure coding -->
+    <h3 id="erasure">Erasure coding fundamentals</h3>
+    <ul>
+      <li><b>Erasures vs errors.</b> An erasure is a loss at a <i>known</i> position (a shred is simply missing). An error is corruption at an <i>unknown</i> position. A code that corrects <b>t</b> errors corrects <b>2t</b> erasures, because locating an error costs half the redundancy. Constellation and Rotor deal almost entirely with <b>erasures</b> - a node either has a shred or it does not; integrity is handled separately by hashes and signatures.</li>
+      <li><b>(n, k) notation.</b> <code>k</code> data shards, <code>n</code> total shards, <code>n - k</code> parity. You recover the original <code>k</code> from <b>any</b> <code>k</code> of the <code>n</code>. For Constellation, <code>k = 64</code> recovery threshold, <code>n = 256</code> pshreds.</li>
+      <li><b>MDS property.</b> Reed-Solomon is Maximum Distance Separable: it meets the Singleton bound (<code>d_min = n - k + 1</code>), meaning any <code>k</code> columns of the generator matrix are independent. That is the algebraic reason "any k of n" works, and it is what makes censorship hard - the adversary cannot pick which shreds count.</li>
+      <li><b>Recovery threshold = k.</b> The minimum surviving shards to fully reconstruct. Tolerates up to <code>n - k</code> erasures regardless of which ones are lost.</li>
+    </ul>
+
+    <h4>FEC overhead vs replication - quantify it</h4>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Scheme</th><th>To tolerate <code>f</code> losses</th><th>Storage multiplier</th><th>Example: tolerate 3 losses</th></tr></thead>
+        <tbody>
+          <tr><td>Replication</td><td><code>f + 1</code> full copies</td><td><code>(f + 1)x</code></td><td>4x (300% overhead)</td></tr>
+          <tr><td>Reed-Solomon (n, k)</td><td><code>n - k = f</code> parity shards</td><td><code>n / k</code></td><td>Backblaze 17+3: <b>1.176x</b> (17.6% overhead)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>RS <b>decouples fault tolerance from the storage multiplier</b>; replication does not. As <code>k</code> grows, RS overhead for the same <code>f</code> shrinks toward zero while replication stays linear in <code>f</code>. For the 50ms tick budget, the cost to fit is roughly <code>t_encode + t_transmit + t_decode</code>, where transmit scales by the <code>n / k</code> factor. For Constellation's 64-of-256, the redundancy ratio is <code>256 / 64 = 4x</code> - generous redundancy bought specifically for censorship resistance, which is the whole point.</p>
+
+    <!-- GF(2^8) -->
+    <h3 id="gf">Galois field GF(2^8) arithmetic - the engine room</h3>
+    <p>Reed-Solomon does linear algebra over a finite field so the math stays exact and closed (no overflow, every nonzero element has an inverse). For byte-oriented data the natural field is <b>GF(2^8)</b>: one byte = one of 256 field elements.</p>
+    <div class="grid2">
+      <div class="card"><h4>Addition = XOR</h4>
+        <p style="margin-bottom:0">Elements are polynomials over GF(2) (bits as coefficients); adding mod 2 is just XOR. Subtraction is identical (since -1 = 1). Example: <code>0x53 ^ 0xCA = 0x99</code>.</p>
+      </div>
+      <div class="card"><h4>Multiplication = polynomial multiply, then reduce</h4>
+        <p style="margin-bottom:0">Multiply the two degree-&le;7 polynomials (carryless), then reduce modulo a fixed degree-8 <b>irreducible polynomial</b> so the result fits back in a byte.</p>
+      </div>
+    </div>
+
+    <div class="fig">
+      <svg viewBox="0 0 900 150" role="img" aria-label="GF(2^8) multiplication">
+        <defs><marker id="ar4" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#3c7a2c"/></marker></defs>
+        <rect x="20" y="50" width="170" height="50" rx="9" fill="#edf8ee" stroke="#cfe9d2"/>
+        <text x="105" y="72" text-anchor="middle" font-size="12.5" font-weight="700" fill="#2c5a20">a, b as bytes</text>
+        <text x="105" y="89" text-anchor="middle" font-size="10.5" fill="#3c7a2c">= polynomials deg &le; 7</text>
+        <line x1="190" y1="75" x2="220" y2="75" stroke="#3c7a2c" stroke-width="2" marker-end="url(#ar4)"/>
+        <rect x="222" y="50" width="210" height="50" rx="9" fill="#edf8ee" stroke="#cfe9d2"/>
+        <text x="327" y="72" text-anchor="middle" font-size="12.5" font-weight="700" fill="#2c5a20">carryless multiply</text>
+        <text x="327" y="89" text-anchor="middle" font-size="10.5" fill="#3c7a2c">product deg up to 14</text>
+        <line x1="432" y1="75" x2="462" y2="75" stroke="#3c7a2c" stroke-width="2" marker-end="url(#ar4)"/>
+        <rect x="464" y="50" width="250" height="50" rx="9" fill="#edf8ee" stroke="#cfe9d2"/>
+        <text x="589" y="72" text-anchor="middle" font-size="12.5" font-weight="700" fill="#2c5a20">reduce mod 0x11D</text>
+        <text x="589" y="89" text-anchor="middle" font-size="10.5" fill="#3c7a2c">XOR shifted 0x1D while deg &ge; 8</text>
+        <line x1="714" y1="75" x2="744" y2="75" stroke="#3c7a2c" stroke-width="2" marker-end="url(#ar4)"/>
+        <rect x="746" y="50" width="130" height="50" rx="9" fill="#dff0e1" stroke="#cfe9d2"/>
+        <text x="811" y="79" text-anchor="middle" font-size="13" font-weight="800" fill="#2c5a20">result byte</text>
+      </svg>
+      <div class="cap"><b>One GF(2^8) multiply.</b> The reduction step (XOR a shifted copy of the low byte of the irreducible polynomial whenever a degree-8-or-higher term appears) is what keeps the product inside one byte.</div>
+    </div>
+
+    <h4>Which irreducible polynomial? It must match the reference</h4>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Polynomial</th><th>Used by</th><th>Generator</th><th>Note</th></tr></thead>
+        <tbody>
+          <tr><td><code>0x11D</code> = x^8+x^4+x^3+x^2+1</td><td>Reed-Solomon convention</td><td><code>0x02</code> (primitive - all 255 powers distinct)</td><td>The usual RS choice; simplest generator.</td></tr>
+          <tr><td><code>0x11B</code> = x^8+x^4+x^3+x+1</td><td>AES</td><td><code>0x03</code> (0x02 is <b>not</b> primitive here - cycle length 51)</td><td>Different field labeling; results differ from 0x11D.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="box warn"><span class="bt">Field-mismatch is the classic silent bug</span><p style="margin-bottom:0"><code>0x53 * 0xCA = 0x8F</code> under <code>0x11D</code>, but <code>= 0x01</code> under <code>0x11B</code> (they are multiplicative inverses in the AES field). Both are "GF(2^8)" but they are different fields. If your byte-for-byte comparison against <code>reed-solomon-novelpoly</code> fails, the <b>first thing to check is that the irreducible polynomial and generator match exactly</b>. A result of <code>0x01</code> for <code>0x53 * 0xCA</code> means you accidentally built the AES field.</p></div>
+
+    <h4>Russian-peasant multiply, and the fast log/antilog table</h4>
+    <pre><code>// GF(2^8) multiply, irreducible 0x11D (low byte 0x1D). Verified results below.
+fn gf_mul(mut a: u8, mut b: u8) -&gt; u8 {
+    let mut r: u8 = 0;
+    for _ in 0..8 {
+        if b &amp; 1 == 1 { r ^= a; }      // add current shifted a
+        let hi = a &amp; 0x80;             // top bit set? reduction needed after shift
+        a &lt;&lt;= 1;
+        if hi != 0 { a ^= 0x1D; }      // reduce by low byte of 0x11D
+        b &gt;&gt;= 1;
+    }
+    r
+}
+// Production path: precompute exp[] (antilog) and log[] tables once.
+//   a * b = exp[(log[a] + log[b]) % 255]   for a,b != 0;  0 if either is 0.
+//   a^-1  = exp[(255 - log[a]) % 255]</code></pre>
+
+    <h4>Worked, verified values (0x11D, generator 0x02)</h4>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Input</th><th>Result</th><th>What it exercises</th></tr></thead>
+        <tbody>
+          <tr><td><code>0x00 * anything</code></td><td><code>0x00</code></td><td>Zero - and <code>log[0]</code> is undefined, so the table path must special-case it.</td></tr>
+          <tr><td><code>0x01 * 0xAB</code></td><td><code>0xAB</code></td><td>Identity - must not trigger a reduction.</td></tr>
+          <tr><td><code>0x02 * 0x80</code></td><td><code>0x1D</code></td><td>Exactly one reduction (top bit set once).</td></tr>
+          <tr><td><code>0xFF * 0xFF</code></td><td><code>0xE2</code></td><td>Many reductions in one multiply; cumulative-XOR stress.</td></tr>
+          <tr><td><code>0x53 * 0xCA</code></td><td><code>0x8F</code></td><td>Field-mismatch detector (would be <code>0x01</code> under 0x11B).</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="box info"><span class="bt">These five are your "Verify" exercise answer</span><p style="margin-bottom:0">The week's AI "Verify" task is to paste your GF(2^8) multiplier and RS encoder and ask for five boundary-case inputs that stress field arithmetic. The table above is a strong set: zero, identity, single-reduction, maximal-value-squared, and the field-mismatch canary. A good sixth is <code>a * a^-1 = 1</code> at the table boundary (<code>log[a] = 0</code> or <code>254</code>) to catch mod-255 off-by-one errors.</p></div>
+
+    <!-- Reed-Solomon -->
+    <h3 id="rs">Reed-Solomon encode and decode</h3>
+    <p><b>Systematic encoding</b> means the first <code>k</code> output shards are the original data unchanged; the remaining <code>n - k</code> are parity, computed as GF(2^8) linear combinations of the data.</p>
+    <div class="fig">
+      <svg viewBox="0 0 900 260" role="img" aria-label="Reed-Solomon systematic encode and decode">
+        <!-- encode -->
+        <text x="20" y="26" font-size="13" font-weight="700" fill="#0a2540">Encode:  n x k matrix  *  k data shards  =  n shards</text>
+        <!-- matrix -->
+        <rect x="30" y="40" width="120" height="120" rx="8" fill="#edf8ee" stroke="#cfe9d2"/>
+        <rect x="40" y="50" width="100" height="55" rx="4" fill="#cfe9d2"/>
+        <text x="90" y="82" text-anchor="middle" font-size="11" font-weight="700" fill="#2c5a20">identity (k x k)</text>
+        <rect x="40" y="110" width="100" height="42" rx="4" fill="#f4c98a"/>
+        <text x="90" y="135" text-anchor="middle" font-size="11" font-weight="700" fill="#7a4a10">parity rows</text>
+        <text x="170" y="105" font-size="20" fill="#5b6b7b">&times;</text>
+        <!-- data -->
+        <rect x="195" y="50" width="55" height="100" rx="6" fill="#eef5fc" stroke="#9fcdf2"/>
+        <text x="222" y="104" text-anchor="middle" font-size="11" font-weight="700" fill="#10497f" transform="rotate(-90 222 104)">k data</text>
+        <text x="268" y="105" font-size="20" fill="#5b6b7b">=</text>
+        <!-- output -->
+        <rect x="295" y="40" width="60" height="65" rx="6" fill="#cfe9d2" stroke="#cfe9d2"/>
+        <text x="325" y="78" text-anchor="middle" font-size="10.5" font-weight="700" fill="#2c5a20">data</text>
+        <rect x="295" y="108" width="60" height="52" rx="6" fill="#f4c98a"/>
+        <text x="325" y="138" text-anchor="middle" font-size="10.5" font-weight="700" fill="#7a4a10">parity</text>
+        <text x="325" y="178" text-anchor="middle" font-size="10.5" fill="#5b6b7b">n shards</text>
+        <!-- decode -->
+        <text x="440" y="26" font-size="13" font-weight="700" fill="#0a2540">Decode:  take rows for surviving shards, invert, recover</text>
+        <rect x="450" y="50" width="120" height="100" rx="8" fill="#fff6ea" stroke="#f6e0bf"/>
+        <text x="510" y="95" text-anchor="middle" font-size="11" font-weight="700" fill="#9a6a1f">M' (k x k)</text>
+        <text x="510" y="112" text-anchor="middle" font-size="10" fill="#9a6a1f">rows you still have</text>
+        <text x="585" y="105" font-size="14" fill="#5b6b7b">invert</text>
+        <line x1="585" y1="115" x2="640" y2="115" stroke="#5b6b7b" stroke-width="2" marker-end="url(#ar)"/>
+        <rect x="650" y="50" width="120" height="100" rx="8" fill="#fff6ea" stroke="#f6e0bf"/>
+        <text x="710" y="95" text-anchor="middle" font-size="11" font-weight="700" fill="#9a6a1f">M'^-1</text>
+        <text x="785" y="105" font-size="14" fill="#5b6b7b">apply</text>
+        <line x1="785" y1="115" x2="840" y2="115" stroke="#5b6b7b" stroke-width="2" marker-end="url(#ar)"/>
+        <rect x="845" y="60" width="48" height="80" rx="6" fill="#eef5fc" stroke="#9fcdf2"/>
+        <text x="869" y="104" text-anchor="middle" font-size="10.5" font-weight="700" fill="#10497f" transform="rotate(-90 869 104)">k data</text>
+        <text x="455" y="200" font-size="12" fill="#5b6b7b">MDS guarantees every k x k submatrix M' is invertible, so any k surviving shards work.</text>
+        <text x="455" y="222" font-size="12" fill="#5b6b7b">Inversion is Gaussian elimination over GF(2^8) using the log-table inverses.</text>
+      </svg>
+      <div class="cap"><b>Systematic RS.</b> The top identity block makes data pass through unchanged; the parity rows (Vandermonde or Cauchy, both MDS) are the redundancy. Decode picks the rows for the shards you still hold, inverts that k x k submatrix, and multiplies.</div>
+    </div>
+    <ul>
+      <li><b>Encoding matrix.</b> An <code>n x k</code> matrix whose top <code>k x k</code> is the identity (systematic) and whose bottom rows make every <code>k x k</code> submatrix invertible. Built from a <b>Vandermonde</b> matrix (row i = powers of a distinct field element) or a <b>Cauchy</b> matrix (<code>1 / (x_i + y_j)</code>), both of which guarantee the MDS condition. Many practical libraries prefer Cauchy for numerical robustness.</li>
+      <li><b>Decode.</b> Receive any <code>k</code> shards, take the matching <code>k</code> rows of the matrix to form <code>M'</code>, invert it over GF(2^8), and compute <code>data = M'^-1 * received</code>. Regenerate any missing parity afterward if needed.</li>
+    </ul>
+
+    <!-- novelpoly -->
+    <h3 id="novelpoly">reed-solomon-novelpoly - the validation reference</h3>
+    <p>The lab compares your output against <a href="https://github.com/paritytech/reed-solomon-novelpoly"><code>reed-solomon-novelpoly</code></a> (ParityTech, used in Polkadot's data-availability layer). It is an <b>FFT-based</b> Reed-Solomon using the Lin-Chung-Han "novel polynomial basis" algorithm.</p>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th></th><th>Classic Vandermonde/Cauchy RS</th><th>novelpoly (FFT RS)</th></tr></thead>
+        <tbody>
+          <tr><th>Field</th><td>Typically GF(2^8), so n &le; 255</td><td><b>GF(2^16)</b>, so n up to 65535</td></tr>
+          <tr><th>Basis</th><td>Standard monomial basis</td><td>"Novel polynomial basis" enabling an additive FFT over characteristic-2 fields</td></tr>
+          <tr><th>Encode</th><td>O(n&middot;k) matrix-vector multiply</td><td>O(n log n)</td></tr>
+          <tr><th>Decode</th><td>O(k^2) to O(k^3) matrix inversion</td><td>O(n log n)</td></tr>
+          <tr><th>Best for</th><td>Small n (e.g. Backblaze 17+3)</td><td>Large n (hundreds to thousands of shards)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="box caution"><span class="bt">Two gotchas for byte-for-byte parity</span>
+      <p><b>Field size differs.</b> novelpoly works over GF(2^16), not the GF(2^8) of the teaching examples above. A naive GF(2^8) encoder will not match it byte-for-byte unless you align the field, shard layout, and basis. The "compare byte-for-byte" exercise is really a test of whether your encoder is parameterized identically to the reference, not just "also Reed-Solomon."</p>
+      <p style="margin-bottom:0"><b>Check n constraints.</b> FFT-based schemes often want n as a power of two. Read the crate's <code>encode</code>/<code>reconstruct</code> signatures and tests in the source before assuming arbitrary n works - this detail was not confirmable from docs alone.</p>
+    </div>
+
+    <h3>Lab game plan</h3>
+    <ol>
+      <li>Implement <code>gf_mul</code> (and log/antilog tables) for your target field; unit-test against the five boundary values above.</li>
+      <li>Build the systematic encoding matrix (identity block + Vandermonde or Cauchy rows). Verify a small case by hand: every <code>k x k</code> submatrix determinant nonzero.</li>
+      <li>Encode a pslice into <code>n = 256</code> shards parameterized to Constellation's <code>k = 64</code> recovery threshold.</li>
+      <li>Drop random shards down to exactly 64 survivors; decode; assert you recover the original bytes. Repeat across many random erasure patterns.</li>
+      <li>Configure your encoder to match <code>reed-solomon-novelpoly</code>'s field and layout, run both on identical input, and diff the output byte-for-byte. Investigate any mismatch starting with the field parameters.</li>
+      <li><b>Quantify</b>: time encode + decode and check the encode-and-disseminate path could fit a 50ms budget at realistic shard sizes. Note the <code>n/k = 4x</code> bandwidth overhead.</li>
+    </ol>
+  </section>
+
+  <hr>
+
+  <!-- ===== AI INTEGRATION ===== -->
+  <section id="ai">
+    <h2><span class="kicker accent-ai">AI integration</span>Three ways to use an LLM to actually learn this</h2>
+    <p>The week pairs each topic with an AI exercise. The common thread: use the model to <b>generate hypotheses or procedures you then verify against ground truth</b> (real code, real test runs, real packet captures), never as a final-answer oracle.</p>
+    <div class="grid3">
+      <div class="card"><h4 class="accent-mon">Explain</h4>
+        <p>Paste RFC 9000 &sect;4.1 and ask where Agave's TPU enforces it and what happens if a client ignores it.</p>
+        <p class="small" style="margin-bottom:0"><b>Why it works:</b> forces a falsifiable spec-to-code claim ("this function enforces this rule") you then verify by reading the cited code. Answer is in the <a href="#tpu">TPU section</a>: <code>configure_server</code> in <code>quic.rs</code>, enforced by Quinn (<code>FLOW_CONTROL_ERROR</code>) plus Agave's own <code>invalid_stream</code> close.</p>
+      </div>
+      <div class="card"><h4 class="accent-lab">Verify</h4>
+        <p>Paste your GF(2^8) multiplier and RS encoder; ask for five boundary-case inputs that stress field arithmetic.</p>
+        <p class="small" style="margin-bottom:0"><b>Why it works:</b> turns the LLM into an adversary generating edge cases (zero, identity, single-reduction, 0xFF*0xFF, field-mismatch canary). You still have to run them - which is where the learning compounds. Answers in the <a href="#gf">GF(2^8) section</a>.</p>
+      </div>
+      <div class="card"><h4 class="accent-thu">Debug</h4>
+        <p>Paste a QUIC connection-failure log; ask for an ordered checklist of what to verify in Wireshark.</p>
+        <p class="small" style="margin-bottom:0"><b>Why it works:</b> the model proposes a <i>diagnostic procedure</i> rather than a guessed root cause, and you execute it against real captures. Keeps the LLM as a pair-debugger, not an oracle.</p>
+      </div>
+    </div>
+    <h4>A starter Wireshark checklist for a failing QUIC handshake</h4>
+    <ol>
+      <li>Filter <code>quic</code>. Confirm an <b>Initial</b> packet leaves the client and an Initial returns from the server (if not: firewall, wrong port, or UDP blocked).</li>
+      <li>Check <b>Version Negotiation</b> - a VN packet means the client's QUIC version is unsupported.</li>
+      <li>Inspect <b>ALPN</b> in the TLS ClientHello: for Solana TPU it must be <code>solana-tpu</code>. A mismatch is rejected at handshake.</li>
+      <li>Look for a <b>Retry</b> packet - the server is doing address validation; confirm the client re-sends an Initial echoing the token.</li>
+      <li>Watch for early <b>CONNECTION_CLOSE</b>: code maps to the reason. Agave codes include <code>2 "disallowed"</code> (rate-limited) and <code>5 "invalid_stream"</code> (oversized stream).</li>
+      <li>Check transport parameters for stream/data limits, and whether the client got <b>0</b> initial uni-streams (it must wait for the stake-based allowance after handshake).</li>
+      <li>If the connection opens then stalls, look for <b>idle timeout</b> (30s server side) and missing keep-alives.</li>
+    </ol>
+    <div class="box key"><span class="bt">If "MCPs" did mean Model Context Protocol</span><p style="margin-bottom:0">These three loops get tighter with an MCP server wired into your assistant: a Tool that runs <code>tshark</code> over a pcap, a Resource exposing your Agave checkout for cited lookups, and a Resource per RFC section so the model quotes normative text. That is the bridge between the AI-integration exercises and the (less likely) Model-Context-Protocol reading of Tuesday.</p></div>
+  </section>
+
+  <hr>
+
+  <!-- ===== OUTCOMES ===== -->
+  <section id="outcomes">
+    <h2><span class="kicker accent-lab">Self-assessment</span>Skill outcomes - can you do these?</h2>
+    <p>By the end of the week you should be able to do all five. Use this as a checklist; if any item is shaky, the linked section is where to go.</p>
+    <ul class="check">
+      <li>Reason about Rotor's data layers and primitives - shreds, slices, relays, stake-weighted sampling. (<a href="#wed">Wed</a>)</li>
+      <li>Implement Reed-Solomon encode and decode over GF(2^8), including the matrix inversion on erasure. (<a href="#rs">Lab</a>)</li>
+      <li>Quantify FEC overhead against the 50ms tick budget, including the <code>n/k</code> bandwidth factor. (<a href="#tickbudget">Wed</a> + <a href="#erasure">Lab</a>)</li>
+      <li>Explain why Constellation uses erasure coding rather than replication for censorship resistance. (<a href="#censor">Wed</a>)</li>
+      <li>Trace a QUIC stream from a TPU client to the stake-weighted connection limit. (<a href="#tpu">Mon</a>)</li>
+    </ul>
+  </section>
+
+  <hr>
+
+  <!-- ===== READING ===== -->
+  <section id="reading">
+    <h2><span class="kicker accent-lab">Study materials</span>Reading list, organized by day</h2>
+    <p class="small"><span class="badge-src b-pri">PRIMARY</span> = spec, whitepaper, or source code. <span class="badge-src b-sec">SECONDARY</span> = explainer or analysis. Verify version-sensitive claims (Agave constants, Constellation specifics) against the exact version you run.</p>
+
+    <h4>Monday - QUIC</h4>
+    <ul class="srcgrid">
+      <li><a href="https://www.rfc-editor.org/rfc/rfc9000">RFC 9000 - QUIC transport</a> <span class="badge-src b-pri">PRIMARY</span> (read &sect;4 and &sect;17)</li>
+      <li><a href="https://www.rfc-editor.org/rfc/rfc9001">RFC 9001 - Using TLS to secure QUIC</a> <span class="badge-src b-pri">PRIMARY</span></li>
+      <li><a href="https://github.com/quinn-rs/quinn">quinn-rs/quinn</a> <span class="badge-src b-pri">PRIMARY</span> + <a href="https://docs.rs/quinn/latest/quinn/">docs.rs</a></li>
+      <li><a href="https://github.com/aws/s2n-quic">aws/s2n-quic</a> <span class="badge-src b-pri">PRIMARY</span> + <a href="https://aws.amazon.com/blogs/security/introducing-s2n-quic-open-source-protocol-rust/">intro post</a></li>
+      <li><a href="https://github.com/anza-xyz/agave/blob/master/streamer/src/quic.rs">agave streamer/src/quic.rs</a> <span class="badge-src b-pri">PRIMARY</span></li>
+      <li><a href="https://github.com/anza-xyz/agave/blob/master/streamer/src/nonblocking/quic.rs">agave nonblocking/quic.rs</a> <span class="badge-src b-pri">PRIMARY</span></li>
+      <li><a href="https://github.com/anza-xyz/agave/blob/master/streamer/src/nonblocking/swqos.rs">agave swqos.rs</a> <span class="badge-src b-pri">PRIMARY</span></li>
+      <li><a href="https://docs.anza.xyz/validator/tpu">Anza TPU docs</a> <span class="badge-src b-pri">PRIMARY</span></li>
+      <li><a href="https://www.helius.dev/blog/all-you-need-to-know-about-solana-and-quic">Helius - Solana &amp; QUIC</a> <span class="badge-src b-sec">SECONDARY</span></li>
+      <li><a href="https://www.helius.dev/blog/stake-weighted-quality-of-service-everything-you-need-to-know">Helius - Stake-Weighted QoS</a> <span class="badge-src b-sec">SECONDARY</span></li>
+    </ul>
+
+    <h4>Tue / Wed / Thu - MCP, Constellation, Alpenglow</h4>
+    <ul class="srcgrid">
+      <li><a href="https://arxiv.org/abs/2509.23984">Multiple Concurrent Proposers: Why and How (Garimidi, Neu, Resnick)</a> <span class="badge-src b-pri">PRIMARY</span></li>
+      <li><a href="https://www.anza.xyz/blog/constellation">Anza - Constellation</a> <span class="badge-src b-pri">PRIMARY</span></li>
+      <li><a href="https://constellation.anza.xyz/">Constellation proposal tracker</a> <span class="badge-src b-pri">PRIMARY</span></li>
+      <li><a href="https://www.anza.xyz/blog/alpenglow-a-new-consensus-for-solana">Anza - Alpenglow</a> <span class="badge-src b-pri">PRIMARY</span></li>
+      <li><a href="https://github.com/solana-foundation/solana-improvement-documents/blob/main/proposals/0326-alpenglow.md">SIMD-0326 (Alpenglow)</a> <span class="badge-src b-pri">PRIMARY</span></li>
+      <li><a href="https://www.helius.dev/blog/constellation">Helius - What is Constellation</a> <span class="badge-src b-sec">SECONDARY</span></li>
+      <li><a href="https://www.helius.dev/blog/alpenglow">Helius - Alpenglow deep dive</a> <span class="badge-src b-sec">SECONDARY</span></li>
+      <li><a href="https://blog.anagram.xyz/constellation-is-not-ready-for-the-simd/">Anagram - critique (read the other side)</a> <span class="badge-src b-sec">SECONDARY</span></li>
+      <li><a href="https://modelcontextprotocol.io/introduction">Model Context Protocol intro (sidebar reading)</a> <span class="badge-src b-pri">PRIMARY</span></li>
+    </ul>
+
+    <h4>Lab - erasure coding</h4>
+    <ul class="srcgrid">
+      <li><a href="https://github.com/paritytech/reed-solomon-novelpoly">paritytech/reed-solomon-novelpoly</a> <span class="badge-src b-pri">PRIMARY</span></li>
+      <li><a href="https://docs.rs/reed-solomon-novelpoly/latest/reed_solomon_novelpoly/">novelpoly docs.rs</a> <span class="badge-src b-pri">PRIMARY</span></li>
+      <li><a href="https://arxiv.org/abs/1404.3458">Lin-Chung-Han, Novel Polynomial Basis (arXiv:1404.3458)</a> <span class="badge-src b-pri">PRIMARY</span></li>
+      <li><a href="https://www.backblaze.com/blog/reed-solomon/">Backblaze - Reed-Solomon, open sourced</a> <span class="badge-src b-sec">SECONDARY</span></li>
+      <li><a href="https://en.wikipedia.org/wiki/Finite_field_arithmetic">Wikipedia - Finite field arithmetic</a> <span class="badge-src b-sec">SECONDARY</span></li>
+      <li><a href="https://en.wikipedia.org/wiki/Reed%E2%80%93Solomon_error_correction">Wikipedia - Reed-Solomon</a> <span class="badge-src b-sec">SECONDARY</span></li>
+      <li><a href="https://errorcorrectionzoo.org/c/mds">Error Correction Zoo - MDS codes</a> <span class="badge-src b-sec">SECONDARY</span></li>
+      <li><a href="https://codyplanteen.com/notes/rs">Cody Planteen - RS notes (0x11D vs 0x11B)</a> <span class="badge-src b-sec">SECONDARY</span></li>
+    </ul>
+  </section>
+
+  <hr>
+
+  <!-- ===== CAVEATS ===== -->
+  <section id="caveats">
+    <h2><span class="kicker accent-lab">Honesty</span>Caveats and confidence</h2>
+    <p>What is solid, and what to treat with care:</p>
+    <ul>
+      <li><span class="tag-inline tg-v">VERIFIED</span> QUIC mechanics (RFC 9000/9001), the TPU pipeline, that Agave uses Quinn, the Alpenglow Votor 80/60 and Rotor single-hop design, and Constellation's pshred lifecycle, 64-of-256 recovery, 40% inclusion, 60% validity, and 50ms cycle. All traced to primary sources.</li>
+      <li><span class="tag-inline tg-s">CHECK VERSION</span> Agave constants (stream counts, connection caps, the 80/20 split) drift between releases. The numbers here are from <code>master</code> around <code>v4.1.0-beta.3</code> (June 2026), with active QoS refactoring underway. Re-check against your tag.</li>
+      <li><span class="tag-inline tg-s">PROPOSAL-STAGE</span> Constellation is unratified and publicly contested (Anagram critique). Rotor's exact Reed-Solomon parameters are explicitly deferred to a future SIMD - SIMD-0326 keeps Turbine initially.</li>
+      <li><span class="tag-inline tg-l">INTERPRETATION</span> "MCPs" is read here as Multiple Concurrent Proposers based on strong contextual fit. The Model Context Protocol reading is covered as a sidebar but judged less likely. Confirm with the cohort if it matters.</li>
+      <li><span class="tag-inline tg-s">SCHEMATIC</span> The 50ms-budget split diagram shows proportions for intuition, not Anza-published timings. No per-voting-round millisecond budget is published beyond the 50ms cycle and the ~2x-of-network finality figure.</li>
+      <li><span class="tag-inline tg-l">FULL HECC vs v1</span> "Constellation-parameterised encoder" maps to HECC in theory; the shipped v1 uses plain Reed-Solomon with partial hiding. Full HECC is future work.</li>
+    </ul>
+    <p class="footnote" style="margin-top:24px">Week 3 of the Turbin3 Q2 2026 Advanced SVM cohort. Research fanned across primary RFCs, Agave source, the Anza Alpenglow and Constellation posts, SIMD-0326, arXiv:2509.23984, and cross-checked secondary explainers. Built 2026-06-11; no claim here was fabricated, uncertainty is flagged inline. Allen Saji &middot; <a href="https://allensaji.dev">allensaji.dev</a> &middot; <a href="https://x.com/SajiBhai011">@SajiBhai011</a></p>
+  </section>
+
+  </main>
+</div>
+</div>
+</body>
+</html>
