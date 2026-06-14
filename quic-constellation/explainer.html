@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>W3: QUIC &amp; Constellation | Transport for Proposers, FEC for Censorship Resistance</title>
-<meta name="description" content="Week 3 of the Turbin3 Advanced SVM cohort decoded: QUIC transport (RFC 9000/9001, Agave TPU flow control and stake-weighted QoS), Multiple Concurrent Proposers, Constellation's pshred lifecycle, the 50ms tick budget, and a Reed-Solomon / GF(2^8) / reed-solomon-novelpoly erasure-coding lab. Every concept, prerequisite, and study source, fact-checked against primary sources.">
+<meta name="description" content="Week 3 of the Turbin3 Advanced SVM cohort decoded: QUIC transport (RFC 9000/9001, Agave TPU flow control and stake-weighted QoS), Multiple Concurrent Proposers, Constellation's pshred lifecycle, the 50ms tick budget, and a hands-on erasure-coding lab: re-parameterise Agave's shredder from 32:32 to Constellation's 64:192 with the reed-solomon-erasure crate, validated under tc netem packet loss. Every concept, prerequisite, and study source, fact-checked against primary sources.">
 <meta name="note-title" content="W3: QUIC and Constellation Erasure Coding">
 <meta name="note-category" content="QUIC and Constellation">
 <meta name="note-order" content="1">
@@ -194,10 +194,12 @@
     <a href="#censor" class="lvl2">Censorship resistance</a>
     <a href="#thu">Thu &middot; Max Resnick</a>
     <a href="#lab">Weekly lab</a>
+    <a href="#agave" class="lvl2">Agave baseline</a>
     <a href="#erasure" class="lvl2">Erasure coding</a>
-    <a href="#gf" class="lvl2">GF(2^8) arithmetic</a>
-    <a href="#rs" class="lvl2">Reed-Solomon</a>
-    <a href="#novelpoly" class="lvl2">novelpoly</a>
+    <a href="#crate" class="lvl2">reed-solomon-erasure</a>
+    <a href="#netem" class="lvl2">tc netem loss</a>
+    <a href="#bench" class="lvl2">Benchmark (PR #5695)</a>
+    <a href="#gf" class="lvl2">Under the hood</a>
     <a href="#ai">AI integration</a>
     <a href="#outcomes">Skill outcomes</a>
     <a href="#reading">Study materials</a>
@@ -263,7 +265,7 @@
       <div class="cap"><b>The week in one diagram.</b> QUIC carries transactions in (Mon). Constellation runs many proposers concurrently and erasure-codes each proposer's batch into 256 pshreds so no small coalition can censor it (Tue/Wed). Alpenglow then finalizes the resulting block (context). Max Resnick co-authored the proposer half (Thu).</div>
     </div>
 
-    <p>By the end of the week you should be able to trace a transaction from a client socket all the way to a stake-weighted QUIC connection limit, implement Reed-Solomon encode and decode by hand, quantify how much erasure-coding overhead a 50ms budget can absorb, and explain in plain terms why fair block construction uses erasure coding instead of replication.</p>
+    <p>By the end of the week you should be able to trace a transaction from a client socket all the way to a stake-weighted QUIC connection limit, re-parameterise Agave's shredder from its 32:32 FEC sizing to Constellation's 64-of-256 using the reed-solomon-erasure crate, quantify how much erasure-coding overhead a 50ms budget can absorb, and explain in plain terms why fair block construction uses erasure coding instead of replication.</p>
   </section>
 
   <!-- ===== PREREQUISITES ===== -->
@@ -713,8 +715,34 @@ connection.set_max_concurrent_uni_streams(streams); // RFC 9000 MAX_STREAMS</cod
 
   <!-- ===== LAB ===== -->
   <section id="lab">
-    <h2><span class="kicker accent-lab">Weekly lab</span>Build a Constellation-parameterised encoder</h2>
-    <div class="box key"><span class="bt">The task, restated</span><p style="margin-bottom:0">Implement a Constellation-parameterised Reed-Solomon encoder. Run it against the Constellation recovery threshold (any <b>64 of 256</b> reconstruct). Then compare <b>byte-for-byte output</b> against the <code>reed-solomon-novelpoly</code> crate to validate correctness.</p></div>
+    <h2><span class="kicker accent-lab">Weekly lab</span>Implement and re-parameterise an encoder</h2>
+    <div class="box key"><span class="bt">The challenge (Week 3, due Jun 23, 100 pts)</span><p>Read <code>shredder.rs</code> in the Agave source to understand the current FEC set sizing and the <code>ReedSolomonCache</code> struct, then write a Constellation-parameterised encoder using the <b>reed-solomon-erasure</b> crate with the pslice/pshred vocabulary from Constellation, run it against simulated attester loss using <b>tc netem</b>, and extend PR #5695's benchmark structure to cover the new parameters.</p><p style="margin-bottom:0">Anchors: <a href="https://github.com/anza-xyz/agave/pull/5695">agave#5695</a>, <code>ledger/src/shredder.rs</code>, <code>reed_solomon_erasure::galois_8::ReedSolomon</code>. The assignment's tip: round-tripping (encode, then decode and recover the original) is the only meaningful test of RS correctness.</p></div>
+    <div class="box warn"><span class="bt">Correction (2026-06-14)</span><p style="margin-bottom:0">An earlier draft of this page guessed the lab would compare against <code>reed-solomon-novelpoly</code> (GF(2^16) FFT) and build the field math from scratch. The released challenge instead uses the <b>reed-solomon-erasure</b> crate's <code>galois_8</code> (GF(2^8)) backend - the same crate Agave depends on - grounded in Agave's shredder, with tc netem and PR #5695. This section is rewritten to the real task; the field-math sections further down stay as background.</p></div>
+
+    <!-- Agave baseline -->
+    <h3 id="agave">Step 0 - the Agave baseline you re-parameterise</h3>
+    <p>Constellation does not invent erasure coding for Solana - Turbine already shreds every block. The challenge is to <b>re-parameterise</b> that machinery. Agave today (<code>ledger/src/shred.rs</code>):</p>
+    <pre><code>pub const DATA_SHREDS_PER_FEC_BLOCK: usize = 32;
+pub const CODING_SHREDS_PER_FEC_BLOCK: usize = 32;  // 32:32 = 64 shreds per FEC set</code></pre>
+    <p>and it caches one Reed-Solomon encoder per <code>(data, parity)</code> pair in <code>ReedSolomonCache</code> (<code>ledger/src/shredder.rs</code>), wrapping <code>reed_solomon_erasure::galois_8::ReedSolomon</code>:</p>
+    <pre><code>pub struct ReedSolomonCache(
+    LruCacheOnce&lt;(usize, usize), Result&lt;Arc&lt;ReedSolomon&gt;, Error&gt;&gt;,
+);
+// .get(data, parity) -&gt; Arc&lt;ReedSolomon&gt;, lazy OnceLock init, capacity 128
+// encode site (shred/merkle.rs): cache.get(num_data, num_coding)?.encode(shreds)</code></pre>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Concept</th><th>Agave Turbine (today)</th><th>Constellation (re-parameterised)</th></tr></thead>
+        <tbody>
+          <tr><td>data shards</td><td>32</td><td><b>64</b> (gamma_p, recovery threshold)</td></tr>
+          <tr><td>coding / parity shards</td><td>32</td><td><b>192</b></td></tr>
+          <tr><td>total shards</td><td>64</td><td><b>256</b> (Gamma_p, one per attester)</td></tr>
+          <tr><td>recover from</td><td>any 32</td><td><b>any 64</b></td></tr>
+          <tr><td>expansion</td><td>2x</td><td><b>4x</b> (Gamma_p / gamma_p)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small">Source pins (Agave master, commit f8bc56e): <a href="https://github.com/anza-xyz/agave/blob/f8bc56ec839edc6a81facb10bace51e2634badd9/ledger/src/shred.rs#L118-L123">shred.rs#L118</a>, <a href="https://github.com/anza-xyz/agave/blob/f8bc56ec839edc6a81facb10bace51e2634badd9/ledger/src/shredder.rs#L32-L306">shredder.rs#L32</a>.</p>
 
     <!-- Erasure coding -->
     <h3 id="erasure">Erasure coding fundamentals</h3>
@@ -737,7 +765,8 @@ connection.set_max_concurrent_uni_streams(streams); // RFC 9000 MAX_STREAMS</cod
     </div>
     <p>RS <b>decouples fault tolerance from the storage multiplier</b>; replication does not. As <code>k</code> grows, RS overhead for the same <code>f</code> shrinks toward zero while replication stays linear in <code>f</code>. For the 50ms tick budget, the cost to fit is roughly <code>t_encode + t_transmit + t_decode</code>, where transmit scales by the <code>n / k</code> factor. For Constellation's 64-of-256, the redundancy ratio is <code>256 / 64 = 4x</code> - generous redundancy bought specifically for censorship resistance, which is the whole point.</p>
 
-    <!-- GF(2^8) -->
+    <!-- GF(2^8) - background / engine room -->
+    <div class="box info"><span class="bt">Background: what the crate does inside</span><p style="margin-bottom:0">The graded lab calls <code>reed-solomon-erasure</code> (see <a href="#crate">The crate</a> below) - you do not implement the field math. The next two sections explain that math anyway, because it is exactly what <code>galois_8</code> runs internally; the companion repo ships a from-scratch implementation of it as a bonus <code>internals</code> module.</p></div>
     <h3 id="gf">Galois field GF(2^8) arithmetic - the engine room</h3>
     <p>Reed-Solomon does linear algebra over a finite field so the math stays exact and closed (no overflow, every nonzero element has an inverse). For byte-oriented data the natural field is <b>GF(2^8)</b>: one byte = one of 256 field elements.</p>
     <div class="grid2">
@@ -780,7 +809,7 @@ connection.set_max_concurrent_uni_streams(streams); // RFC 9000 MAX_STREAMS</cod
         </tbody>
       </table>
     </div>
-    <div class="box warn"><span class="bt">Field-mismatch is the classic silent bug</span><p style="margin-bottom:0"><code>0x53 * 0xCA = 0x8F</code> under <code>0x11D</code>, but <code>= 0x01</code> under <code>0x11B</code> (they are multiplicative inverses in the AES field). Both are "GF(2^8)" but they are different fields. If your byte-for-byte comparison against <code>reed-solomon-novelpoly</code> fails, the <b>first thing to check is that the irreducible polynomial and generator match exactly</b>. A result of <code>0x01</code> for <code>0x53 * 0xCA</code> means you accidentally built the AES field.</p></div>
+    <div class="box warn"><span class="bt">Field-mismatch is the classic silent bug</span><p style="margin-bottom:0"><code>0x53 * 0xCA = 0x8F</code> under <code>0x11D</code>, but <code>= 0x01</code> under <code>0x11B</code> (they are multiplicative inverses in the AES field). Both are "GF(2^8)" but they are different fields. If a comparison against a reference encoder fails, the <b>first thing to check is that the irreducible polynomial and generator match exactly</b>. A result of <code>0x01</code> for <code>0x53 * 0xCA</code> means you accidentally built the AES field.</p></div>
 
     <h4>Russian-peasant multiply, and the fast log/antilog table</h4>
     <pre><code>// GF(2^8) multiply, irreducible 0x11D (low byte 0x1D). Verified results below.
@@ -861,35 +890,63 @@ fn gf_mul(mut a: u8, mut b: u8) -&gt; u8 {
       <li><b>Decode.</b> Receive any <code>k</code> shards, take the matching <code>k</code> rows of the matrix to form <code>M'</code>, invert it over GF(2^8), and compute <code>data = M'^-1 * received</code>. Regenerate any missing parity afterward if needed.</li>
     </ul>
 
-    <!-- novelpoly -->
-    <h3 id="novelpoly">reed-solomon-novelpoly - the validation reference</h3>
-    <p>The lab compares your output against <a href="https://github.com/paritytech/reed-solomon-novelpoly"><code>reed-solomon-novelpoly</code></a> (ParityTech, used in Polkadot's data-availability layer). It is an <b>FFT-based</b> Reed-Solomon using the Lin-Chung-Han "novel polynomial basis" algorithm.</p>
+    <!-- The crate -->
+    <h3 id="crate">The crate: reed_solomon_erasure::galois_8::ReedSolomon</h3>
+    <p>The challenge specifies the <a href="https://github.com/rust-rse/reed-solomon-erasure"><code>reed-solomon-erasure</code></a> crate (v6.0.0, the same crate and version Agave depends on), specifically its <code>galois_8</code> backend. <code>galois_8</code> is GF(2^8), so <b>total shards cap at 256</b> (<code>ORDER = 256</code>; it errors with <code>TooManyShards</code> only above 256). Constellation's <code>64 + 192 = 256</code> is therefore the <b>exact ceiling</b> of the field - one rung higher (<code>new(65, 192)</code>) fails. That is the quiet punchline: GF(2^8) can <i>just</i> express Constellation, with zero headroom, which is why systems needing more shards (Polkadot's data availability, to thousands of validators) move to GF(2^16).</p>
+    <pre><code>use reed_solomon_erasure::galois_8::ReedSolomon;
+
+let rs = ReedSolomon::new(64, 192)?;          // 64 data : 192 parity = 256 (the ceiling)
+rs.encode(&amp;mut shards)?;                       // systematic: data slots untouched, parity filled
+// ... lose up to 192 pshreds in transit ...
+let mut slots: Vec&lt;Option&lt;Vec&lt;u8&gt;&gt;&gt; = /* survivors as Some, missing as None */;
+rs.reconstruct_data(&amp;mut slots)?;             // succeeds iff &gt;= 64 distinct pshreds survive</code></pre>
+    <p>Encoding is <b>systematic</b> (the first 64 shards are the pslice unchanged), shards are equal-length <code>Vec&lt;u8&gt;</code>, and reconstruction needs any 64 of the 256. Mirror Agave's cache: build <code>ReedSolomon::new(64, 192)</code> once, keyed <code>(64, 192)</code>.</p>
+
+    <div class="box verified"><span class="bt">Round-trip is the only meaningful test</span><p style="margin-bottom:0">Straight from the assignment: encode a pslice, drop pshreds, reconstruct, assert the original bytes return. Sweep many pslice sizes and many random erasure patterns down to exactly 64 survivors, and pin the boundary - 64 recovers, 63 returns <code>TooFewShardsPresent</code>.</p></div>
+
+    <!-- tc netem -->
+    <h3 id="netem">Simulating attester loss with tc netem</h3>
+    <p>An in-memory shard drop proves the math; the challenge wants <b>real packet loss</b>. Send the 256 pshreds as 256 UDP datagrams to an attester, and use Linux <code>tc netem</code> to drop a fraction in flight. Do it in an <b>isolated network namespace</b> (a veth pair) so you never disturb your real loopback:</p>
+    <pre><code># isolated netns + veth, then drop 70% of egress toward the attester
+sudo ip netns add ns ; sudo ip link add veth-h type veth peer name veth-n
+sudo ip link set veth-n netns ns
+sudo ip addr add 10.55.0.1/24 dev veth-h ; sudo ip link set veth-h up
+sudo ip netns exec ns ip addr add 10.55.0.2/24 dev veth-n
+sudo ip netns exec ns ip link set veth-n up
+sudo tc qdisc add dev veth-h root netem loss 70%      # &lt;- the loss knob</code></pre>
+    <p>At 64-of-256, the pslice survives any loss that still delivers <b>&ge; 64</b> pshreds, so the theoretical edge is ~75% loss. 70% leaves margin and reconstructs; push it to 90% and watch it fall below the threshold and fail - the censorship-resistance argument made concrete.</p>
+
+    <!-- Benchmark -->
+    <h3 id="bench">Extending PR #5695's benchmark</h3>
+    <p><a href="https://github.com/anza-xyz/agave/pull/5695">PR #5695</a> ("benchmarks for recovering Merkle shreds from erasure codes", behzadnouri) added a <b>Criterion</b> bench in <code>ledger/benches/make_shreds_from_entries.rs</code> with a <code>run_recover_shreds</code> helper and a <code>bench_recover_shreds</code> sweep:</p>
+    <pre><code>for is_last_in_slot in [false, true] {
+    for num_packets in [28, 32, 48, 56] {
+        for num_code in [1, 8, 16, 32] {      // shreds dropped, then recovered
+            run_recover_shreds(name, c, num_packets, num_code, is_last_in_slot);
+}}}</code></pre>
+    <p>Keep that <code>run_* / bench_* / criterion_group!</code> structure and extend the sweep to Constellation's <code>(64, 192)</code> alongside Agave's <code>(32, 32)</code>: drop N shards (data first, to force real recovery work), then time <code>reconstruct_data</code>.</p>
     <div class="tbl-wrap">
       <table>
-        <thead><tr><th></th><th>Classic Vandermonde/Cauchy RS</th><th>novelpoly (FFT RS)</th></tr></thead>
+        <thead><tr><th>Operation (1 KB shards, 64 KB pslice)</th><th>Turbine 32:32</th><th>Constellation 64:192</th></tr></thead>
         <tbody>
-          <tr><th>Field</th><td>Typically GF(2^8), so n &le; 255</td><td><b>GF(2^16)</b>, so n up to 65535</td></tr>
-          <tr><th>Basis</th><td>Standard monomial basis</td><td>"Novel polynomial basis" enabling an additive FFT over characteristic-2 fields</td></tr>
-          <tr><th>Encode</th><td>O(n&middot;k) matrix-vector multiply</td><td>O(n log n)</td></tr>
-          <tr><th>Decode</th><td>O(k^2) to O(k^3) matrix inversion</td><td>O(n log n)</td></tr>
-          <tr><th>Best for</th><td>Small n (e.g. Backblaze 17+3)</td><td>Large n (hundreds to thousands of shards)</td></tr>
+          <tr><td>encode</td><td>~0.32 ms</td><td>~3.4 ms</td></tr>
+          <tr><td>recover, 32 lost</td><td>~0.27 ms</td><td>~0.55 ms</td></tr>
+          <tr><td>recover, 64+ lost (max data loss)</td><td>-</td><td>~1.1 ms</td></tr>
         </tbody>
       </table>
     </div>
-    <div class="box caution"><span class="bt">Two gotchas for byte-for-byte parity</span>
-      <p><b>Field size differs.</b> novelpoly works over GF(2^16), not the GF(2^8) of the teaching examples above. A naive GF(2^8) encoder will not match it byte-for-byte unless you align the field, shard layout, and basis. The "compare byte-for-byte" exercise is really a test of whether your encoder is parameterized identically to the reference, not just "also Reed-Solomon."</p>
-      <p style="margin-bottom:0"><b>Check n constraints.</b> FFT-based schemes often want n as a power of two. Read the crate's <code>encode</code>/<code>reconstruct</code> signatures and tests in the source before assuming arbitrary n works - this detail was not confirmable from docs alone.</p>
-    </div>
+    <p class="small">Indicative medians, dev laptop, non-SIMD path (Agave enables <code>simd-accel</code>, which is faster). Constellation costs ~10x Turbine's encode at equal shard size - encode is O(data x parity), and 64x192 is ~12x more field multiplies than 32x32. The takeaway for the <a href="#tickbudget">50ms cycle</a>: even the non-SIMD encoder fits with ~10x headroom for a 64 KB pslice, and recovery is ~1 ms worst case.</p>
 
     <h3>Lab game plan</h3>
     <ol>
-      <li>Implement <code>gf_mul</code> (and log/antilog tables) for your target field; unit-test against the five boundary values above.</li>
-      <li>Build the systematic encoding matrix (identity block + Vandermonde or Cauchy rows). Verify a small case by hand: every <code>k x k</code> submatrix determinant nonzero.</li>
-      <li>Encode a pslice into <code>n = 256</code> shards parameterized to Constellation's <code>k = 64</code> recovery threshold.</li>
-      <li>Drop random shards down to exactly 64 survivors; decode; assert you recover the original bytes. Repeat across many random erasure patterns.</li>
-      <li>Configure your encoder to match <code>reed-solomon-novelpoly</code>'s field and layout, run both on identical input, and diff the output byte-for-byte. Investigate any mismatch starting with the field parameters.</li>
-      <li><b>Quantify</b>: time encode + decode and check the encode-and-disseminate path could fit a 50ms budget at realistic shard sizes. Note the <code>n/k = 4x</code> bandwidth overhead.</li>
+      <li>Read <code>ledger/src/shred.rs</code> + <code>shredder.rs</code>: confirm the 32:32 sizing and how <code>ReedSolomonCache.get(data, parity)</code> hands out a cached <code>ReedSolomon</code>.</li>
+      <li>Wrap <code>galois_8::ReedSolomon::new(64, 192)</code> behind a cache of the same shape; speak Constellation - a <code>Pslice</code> shreds into 256 <code>Pshred</code>s; any 64 reconstruct.</li>
+      <li>Round-trip test across many pslice sizes and random erasure patterns; assert the 64-ok / 63-fails boundary.</li>
+      <li>Send the 256 pshreds over UDP through <code>tc netem loss</code> in an isolated netns; reconstruct from survivors; verify the bytes match.</li>
+      <li>Extend PR #5695's Criterion bench to sweep (32,32) vs (64,192); report timings against the 50ms cycle and the 4x bandwidth cost.</li>
     </ol>
+
+    <div class="box key"><span class="bt">Reference implementation</span><p style="margin-bottom:0">A complete worked solution - encoder, round-trip tests, tc netem script, PR #5695-style bench, and a from-scratch GF(2^8) bonus module - is in <code>Allen-Saji/adv-svm-erasure-lab</code>.</p></div>
   </section>
 
   <hr>
@@ -933,7 +990,7 @@ fn gf_mul(mut a: u8, mut b: u8) -&gt; u8 {
     <p>By the end of the week you should be able to do all five. Use this as a checklist; if any item is shaky, the linked section is where to go.</p>
     <ul class="check">
       <li>Reason about Rotor's data layers and primitives - shreds, slices, relays, stake-weighted sampling. (<a href="#wed">Wed</a>)</li>
-      <li>Implement Reed-Solomon encode and decode over GF(2^8), including the matrix inversion on erasure. (<a href="#rs">Lab</a>)</li>
+      <li>Re-parameterise Agave's shredder from 32:32 to Constellation's 64-of-256 with the reed-solomon-erasure crate, validated by round-trip and tc netem loss. (<a href="#crate">Lab</a>)</li>
       <li>Quantify FEC overhead against the 50ms tick budget, including the <code>n/k</code> bandwidth factor. (<a href="#tickbudget">Wed</a> + <a href="#erasure">Lab</a>)</li>
       <li>Explain why Constellation uses erasure coding rather than replication for censorship resistance. (<a href="#censor">Wed</a>)</li>
       <li>Trace a QUIC stream from a TPU client to the stake-weighted connection limit. (<a href="#tpu">Mon</a>)</li>
@@ -976,9 +1033,10 @@ fn gf_mul(mut a: u8, mut b: u8) -&gt; u8 {
 
     <h4>Lab - erasure coding</h4>
     <ul class="srcgrid">
-      <li><a href="https://github.com/paritytech/reed-solomon-novelpoly">paritytech/reed-solomon-novelpoly</a> <span class="badge-src b-pri">PRIMARY</span></li>
-      <li><a href="https://docs.rs/reed-solomon-novelpoly/latest/reed_solomon_novelpoly/">novelpoly docs.rs</a> <span class="badge-src b-pri">PRIMARY</span></li>
-      <li><a href="https://arxiv.org/abs/1404.3458">Lin-Chung-Han, Novel Polynomial Basis (arXiv:1404.3458)</a> <span class="badge-src b-pri">PRIMARY</span></li>
+      <li><a href="https://github.com/rust-rse/reed-solomon-erasure">rust-rse/reed-solomon-erasure</a> <span class="badge-src b-pri">PRIMARY</span> (galois_8, the crate Agave uses)</li>
+      <li><a href="https://github.com/anza-xyz/agave/blob/master/ledger/src/shredder.rs">agave ledger/src/shredder.rs (ReedSolomonCache)</a> <span class="badge-src b-pri">PRIMARY</span></li>
+      <li><a href="https://github.com/anza-xyz/agave/pull/5695">agave PR #5695 - recover benchmarks</a> <span class="badge-src b-pri">PRIMARY</span></li>
+      <li><a href="https://man7.org/linux/man-pages/man8/tc-netem.8.html">tc-netem(8) - network emulation</a> <span class="badge-src b-pri">PRIMARY</span></li>
       <li><a href="https://www.backblaze.com/blog/reed-solomon/">Backblaze - Reed-Solomon, open sourced</a> <span class="badge-src b-sec">SECONDARY</span></li>
       <li><a href="https://en.wikipedia.org/wiki/Finite_field_arithmetic">Wikipedia - Finite field arithmetic</a> <span class="badge-src b-sec">SECONDARY</span></li>
       <li><a href="https://en.wikipedia.org/wiki/Reed%E2%80%93Solomon_error_correction">Wikipedia - Reed-Solomon</a> <span class="badge-src b-sec">SECONDARY</span></li>
@@ -1001,7 +1059,7 @@ fn gf_mul(mut a: u8, mut b: u8) -&gt; u8 {
       <li><span class="tag-inline tg-s">SCHEMATIC</span> The 50ms-budget split diagram shows proportions for intuition, not Anza-published timings. No per-voting-round millisecond budget is published beyond the 50ms cycle and the ~2x-of-network finality figure.</li>
       <li><span class="tag-inline tg-l">FULL HECC vs v1</span> "Constellation-parameterised encoder" maps to HECC in theory; the shipped v1 uses plain Reed-Solomon with partial hiding. Full HECC is future work.</li>
     </ul>
-    <p class="footnote" style="margin-top:24px">Week 3 of the Turbin3 Q2 2026 Advanced SVM cohort. Research fanned across primary RFCs, Agave source, the Anza Alpenglow and Constellation posts, SIMD-0326, arXiv:2509.23984, and cross-checked secondary explainers. Built 2026-06-11; no claim here was fabricated, uncertainty is flagged inline. Allen Saji &middot; <a href="https://allensaji.dev">allensaji.dev</a> &middot; <a href="https://x.com/SajiBhai011">@SajiBhai011</a></p>
+    <p class="footnote" style="margin-top:24px">Week 3 of the Turbin3 Q2 2026 Advanced SVM cohort. Research fanned across primary RFCs, Agave source, the Anza Alpenglow and Constellation posts, SIMD-0326, arXiv:2509.23984, and cross-checked secondary explainers. Built 2026-06-11; lab section corrected to the released challenge 2026-06-14. No claim here was fabricated, uncertainty is flagged inline. Allen Saji &middot; <a href="https://allensaji.dev">allensaji.dev</a> &middot; <a href="https://x.com/SajiBhai011">@SajiBhai011</a></p>
   </section>
 
   </main>
